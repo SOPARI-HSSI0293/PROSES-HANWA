@@ -4,7 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitoring Proses Produksi</title>
+    <!-- Memuat Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Memuat Chart.js untuk Dashboard Analitik -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* Mengatur font default dan dark mode (Tema Zinc/Hitam/Putih) */
@@ -12,18 +14,6 @@
             font-family: 'Inter', sans-serif;
             background-color: #18181b; /* Zinc 900 */
             color: #ffffff;
-        }
-        /* Style untuk kartu menu/navigasi */
-        .menu-card {
-            background-color: #27272a; /* Zinc 800 */
-            transition: all 0.3s ease-in-out;
-            cursor: pointer;
-            border: 1px solid #3f3f46;
-        }
-        .menu-card:hover {
-            background-color: #3f3f46; /* Zinc 700 */
-            transform: translateY(-3px);
-            border-color: #22c55e;
         }
         
         /* Style untuk App View */
@@ -43,6 +33,36 @@
         .login-card {
             background-color: #27272a;
             border-top: 4px solid #22c55e;
+        }
+        
+        /* Style Main Menu Card (Desain Baru) */
+        .menu-card {
+            background-color: #27272a; /* Zinc 800 */
+            transition: all 0.3s ease-in-out;
+            cursor: pointer;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            text-align: center;
+            border-radius: 0.75rem; /* rounded-xl */
+            padding: 2rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            border-left-width: 4px; /* Border warna di kiri seperti referensi */
+        }
+        .menu-card:hover {
+            background-color: #3f3f46; /* Zinc 700 */
+            transform: translateY(-5px);
+            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+        }
+        .icon-wrapper {
+            margin-bottom: 1rem;
+            width: 4rem;
+            height: 4rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
         
         /* Style Tabel */
@@ -68,16 +88,15 @@
             box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
         }
 
-        /* Dashboard Card Specifics (Mirip Gambar Referensi tapi Dark Mode) */
+        /* Dashboard Card Specifics (Gauges) */
         .process-card {
-            background-color: #27272a; /* Zinc 800 */
+            background-color: #27272a;
             border-radius: 0.75rem;
             padding: 1.5rem;
             position: relative;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
-            border-top: 4px solid #22c55e; /* Top border hijau */
+            border-top: 4px solid #22c55e;
         }
-        /* Chart wrapper agar responsive */
         .chart-wrapper {
             position: relative;
             height: 160px;
@@ -117,43 +136,45 @@
 </head>
 <body>
 
+    <!-- Kontainer Utama Aplikasi -->
     <div id="app-container" class="min-h-screen"></div>
 
     <script type="module">
         // --- 1. KONFIGURASI DAN STATE ---
-        // ID Spreadsheet Baru
         const GOOGLE_SHEET_ID = '1QRlL9YUAjWjQwFlXoEX9SK8hA2DeX6i0BPw3WCEid0w'; 
-        // URL Web App Script Baru
         const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz8WCZcK1zjIm9GsUiA3Dd3ftL6EA6PsdZIKaLtZp7wzDYBq1Fl9hHeLPQsS0JLYgai/exec';
         
         const SHEETS = {
-            DASHBOARD: 'dashboardproses', // Nama sheet data proses
-            USER: 'Usercontrol',          // Nama sheet login
-            LOG: 'LogProduksi'            // Opsional: Jika ada sheet log
+            DASHBOARD: 'dashboardproses',
+            USER: 'Usercontrol'
         };
 
-        // State Global
         let currentUser = null;
         let dashboardData = [];
         let dashboardHeaders = [];
-        let chartInstances = {}; // Menyimpan referensi chart agar bisa di-update/destroy
-        let isDataFetched = false;
-
+        let chartInstances = {}; 
+        
         // --- 2. FUNGSI UTILITAS (FETCH & PARSE) ---
         
         async function fetchSheetData(sheetName) {
             const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
             try {
                 const response = await fetch(url);
+                if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
                 const text = await response.text();
-                // Membersihkan response Google Viz yang diawali "/*O_o*/ google.visualization.Query.setResponse("
                 const jsonText = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
+                if (!jsonText) throw new Error("Format data Sheet tidak valid.");
                 const json = JSON.parse(jsonText);
-                
-                if (json.status !== 'ok') throw new Error('Error pada query spreadsheet');
+                if (json.status !== 'ok') {
+                    const errorMsg = json.errors ? json.errors[0].message : 'Query error';
+                    throw new Error(`Gviz Error: ${errorMsg}`);
+                }
                 return parseGVizData(json);
             } catch (error) {
                 console.error(`Gagal mengambil data sheet ${sheetName}:`, error);
+                if (error.message.includes('Failed to fetch')) {
+                    throw new Error("Gagal Terhubung! Pastikan Google Sheet sudah di-SHARE ke 'Anyone with the link' (Public).");
+                }
                 throw error;
             }
         }
@@ -161,17 +182,14 @@
         function parseGVizData(json) {
             const cols = json.table.cols.map(col => (col.label || col.id).toUpperCase().trim());
             const rows = json.table.rows;
-            
             const data = rows.map(row => {
                 let obj = {};
                 cols.forEach((col, index) => {
-                    // Ambil nilai formatted (f) jika ada, jika tidak ambil value (v)
                     const cell = row.c[index];
                     obj[col] = cell ? (cell.v !== null ? cell.v : '') : ''; 
                 });
                 return obj;
             });
-
             return { headers: cols, data: data };
         }
 
@@ -185,9 +203,8 @@
             chartInstances = {};
 
             const container = document.getElementById('app-container');
-            container.innerHTML = ''; // Reset konten
+            container.innerHTML = ''; 
 
-            // Cek Login kecuali halaman login
             if (page !== 'login' && !currentUser) {
                 renderLogin();
                 return;
@@ -195,32 +212,47 @@
 
             switch (page) {
                 case 'login': renderLogin(); break;
-                case 'dashboard': renderDashboard(); break;
+                case 'mainMenu': renderMainMenu(); break; // Halaman Utama Baru
+                case 'monitorDashboard': renderMonitorDashboard(); break; // Dashboard Gauge
                 case 'kontrolMesin': renderKontrolMesin(); break;
                 case 'detailProgress': renderDetailProgress(); break;
                 case 'informasi': renderInformasi(); break;
                 case 'about': renderAbout(); break;
-                default: renderDashboard(); break;
+                default: renderMainMenu(); break;
             }
         }
 
-        function createHeader(title, subtitle = '') {
+        function createHeader(title, subtitle = '', showBackBtn = true) {
             const username = currentUser ? currentUser.username : 'Guest';
+            const role = currentUser ? currentUser.role : '';
+            
+            let backButtonHtml = '';
+            if (showBackBtn) {
+                backButtonHtml = `
+                    <button onclick="navigate('mainMenu')" class="mr-4 text-gray-400 hover:text-white transition">
+                        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+                    </button>
+                `;
+            }
+
             return `
                 <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-gray-700 pb-4">
-                    <div class="flex items-center gap-4">
-                        <img src="https://cdn-icons-png.flaticon.com/512/2920/2920349.png" class="h-10 w-10 filter invert" alt="Logo">
-                        <div>
-                            <h1 class="text-2xl font-bold text-green-500">${title}</h1>
-                            <p class="text-sm text-gray-400">${subtitle}</p>
+                    <div class="flex items-center">
+                        ${backButtonHtml}
+                        <div class="flex items-center gap-4">
+                            <div class="h-10 w-10 bg-green-900 rounded-lg flex items-center justify-center font-bold text-xl text-green-400 border border-green-700">M</div>
+                            <div>
+                                <h1 class="text-2xl font-bold text-green-500 tracking-wide uppercase">${title}</h1>
+                                <p class="text-sm text-gray-400">${subtitle}</p>
+                            </div>
                         </div>
                     </div>
                     <div class="mt-4 md:mt-0 flex items-center gap-3 bg-zinc-800 px-4 py-2 rounded-lg border border-zinc-700">
                         <div class="text-right">
-                            <p class="text-xs text-gray-400">Operator</p>
-                            <p class="font-bold text-white">${username}</p>
+                            <p class="text-xs text-gray-400">User: <span class="text-green-400 font-bold">${username}</span></p>
+                            <p class="text-xs text-gray-500 uppercase tracking-wider">${role}</p>
                         </div>
-                        <button onclick="handleLogout()" class="p-2 text-red-400 hover:bg-zinc-700 rounded-full transition" title="Logout">
+                        <button onclick="handleLogout()" class="ml-2 p-2 text-red-400 hover:bg-zinc-700 rounded-full transition" title="Logout">
                             <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path></svg>
                         </button>
                     </div>
@@ -236,7 +268,7 @@
                     <div class="login-card w-full max-w-sm p-8 rounded-xl shadow-2xl">
                         <div class="text-center mb-8">
                             <h1 class="text-3xl font-bold text-white mb-2">Monitoring Produksi</h1>
-                            <p class="text-gray-400 text-sm">Masuk untuk mengakses dashboard kontrol</p>
+                            <p class="text-gray-400 text-sm">Masuk untuk mengakses sistem</p>
                         </div>
                         <form onsubmit="handleLoginSubmit(event)">
                             <div class="mb-4">
@@ -247,7 +279,7 @@
                                 <label class="block text-sm font-medium text-gray-300 mb-1">Password</label>
                                 <input type="password" id="loginPass" class="form-input" placeholder="Password" required>
                             </div>
-                            <div id="login-msg" class="hidden mb-4 p-3 bg-red-900/50 text-red-200 text-sm rounded border border-red-800"></div>
+                            <div id="login-msg" class="hidden mb-4 p-3 bg-red-900/50 text-red-200 text-sm rounded border border-red-800 font-semibold"></div>
                             <button type="submit" id="btn-login" class="w-full btn-primary bg-green-600 text-white px-4 py-3 rounded-lg font-bold hover:bg-green-700">LOGIN</button>
                         </form>
                     </div>
@@ -268,49 +300,131 @@
 
             try {
                 const result = await fetchSheetData(SHEETS.USER);
-                // Asumsi kolom: USERNAME, PASSWORD, ROLE
                 const user = result.data.find(row => 
-                    String(row.USERNAME).trim() === userIn && 
-                    String(row.PASSWORD).trim() === passIn
+                    String(row.USERNAME || '').trim() === userIn && 
+                    String(row.PASSWORD || '').trim() === passIn
                 );
 
                 if (user) {
-                    currentUser = { username: user.USERNAME, role: user.ROLE || 'Operator' };
+                    // Simpan user dan role
+                    // Default role 'User' jika kosong
+                    const role = String(user.ROLE || 'User').trim(); 
+                    currentUser = { username: user.USERNAME, role: role };
                     sessionStorage.setItem('monitorUser', JSON.stringify(currentUser));
-                    navigate('dashboard');
+                    navigate('mainMenu'); // Masuk ke Menu Utama
                 } else {
                     throw new Error('Username atau Password salah');
                 }
             } catch (err) {
-                msg.textContent = err.message || 'Gagal koneksi ke database.';
+                msg.innerHTML = err.message || 'Gagal koneksi ke database.';
                 msg.classList.remove('hidden');
                 btn.disabled = false;
                 btn.textContent = 'LOGIN';
             }
         }
 
-        // --- 5. HALAMAN DASHBOARD (INTI APLIKASI) ---
-        async function renderDashboard() {
+        // --- 5. HALAMAN MAIN MENU (CARD BASED) ---
+        function renderMainMenu() {
+            const container = document.getElementById('app-container');
+            const userRole = currentUser ? currentUser.role : 'User';
+            
+            // Definisi Menu Items
+            const allMenuItems = [
+                {
+                    id: 'monitorDashboard',
+                    title: 'DASHBOARD MONITOR',
+                    desc: 'Status Efisiensi Mesin Realtime',
+                    color: 'blue', // border-blue-500
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>',
+                    roles: ['Administrator', 'User']
+                },
+                {
+                    id: 'kontrolMesin',
+                    title: 'KONTROL MESIN',
+                    desc: 'Update Status & Output Produksi',
+                    color: 'red', // border-red-500 (Admin Only)
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>',
+                    roles: ['Administrator'] 
+                },
+                {
+                    id: 'detailProgress',
+                    title: 'DETAIL PROGRESS',
+                    desc: 'Tabel Data Produksi Lengkap',
+                    color: 'emerald', // border-emerald-500
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>',
+                    roles: ['Administrator', 'User']
+                },
+                {
+                    id: 'informasi',
+                    title: 'INFORMASI',
+                    desc: 'Panduan & SOP Operator',
+                    color: 'cyan', // border-cyan-500
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>',
+                    roles: ['Administrator', 'User']
+                },
+                {
+                    id: 'about',
+                    title: 'ABOUT APLIKASI',
+                    desc: 'Versi & Info Pengembang',
+                    color: 'purple', // border-purple-500
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>',
+                    roles: ['Administrator', 'User']
+                }
+            ];
+
+            // Filter Menu berdasarkan Role
+            const allowedItems = allMenuItems.filter(item => {
+                // Jika role user adalah 'Administrator', tampilkan semua.
+                // Jika tidak, cek apakah role user ada di list roles item tersebut.
+                if (userRole === 'Administrator') return true;
+                return item.roles.includes(userRole);
+            });
+
+            // Generate HTML Cards
+            const cardsHtml = allowedItems.map(item => `
+                <div onclick="navigate('${item.id}')" class="menu-card border-${item.color}-500 group">
+                    <div class="icon-wrapper text-${item.color}-500 group-hover:text-white transition-colors">
+                        <svg class="w-16 h-16" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                            ${item.icon}
+                        </svg>
+                    </div>
+                    <h2 class="text-xl font-bold uppercase mb-2 text-gray-100 group-hover:text-${item.color}-400 transition-colors">${item.title}</h2>
+                    <p class="text-sm text-gray-400">${item.desc}</p>
+                </div>
+            `).join('');
+
+            container.innerHTML = `
+                <div class="app-view p-6 max-w-7xl mx-auto">
+                    ${createHeader('MENU UTAMA', 'Pilih menu untuk melanjutkan', false)} <!-- false = hide back button -->
+                    
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-10">
+                        ${cardsHtml}
+                    </div>
+                    
+                    <footer class="mt-20 text-center text-xs text-gray-600">
+                        Aplikasi Monitoring Produksi v1.2
+                    </footer>
+                </div>
+            `;
+        }
+
+
+        // --- 6. HALAMAN MONITOR DASHBOARD (GAUGE/DONUT) ---
+        async function renderMonitorDashboard() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
                     ${createHeader('Dashboard Monitor', 'Status Efisiensi dan Output Mesin')}
                     
-                    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-                        <button onclick="navigate('dashboard')" class="bg-green-600 text-white p-3 rounded-lg font-bold shadow-lg ring-2 ring-green-400">Dashboard</button>
-                        <button onclick="navigate('kontrolMesin')" class="bg-zinc-800 hover:bg-zinc-700 text-gray-300 p-3 rounded-lg font-semibold border border-zinc-700">Kontrol Mesin</button>
-                        <button onclick="navigate('detailProgress')" class="bg-zinc-800 hover:bg-zinc-700 text-gray-300 p-3 rounded-lg font-semibold border border-zinc-700">Detail Data</button>
-                        <button onclick="navigate('informasi')" class="bg-zinc-800 hover:bg-zinc-700 text-gray-300 p-3 rounded-lg font-semibold border border-zinc-700">Informasi</button>
-                    </div>
-
                     <div id="loading-indicator" class="text-center py-10 text-gray-400 animate-pulse">
                         Mengambil data Live dari Line Produksi...
                     </div>
 
+                    <!-- Grid Kartu Mesin -->
                     <div id="machine-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
                     
                     <div class="mt-8 text-center">
-                        <button onclick="renderDashboard()" class="text-sm text-green-400 hover:text-green-300 underline">Refresh Data</button>
+                        <button onclick="renderMonitorDashboard()" class="text-sm text-green-400 hover:text-green-300 underline">Refresh Data</button>
                     </div>
                 </div>
             `;
@@ -323,7 +437,14 @@
                 document.getElementById('loading-indicator').classList.add('hidden');
                 renderMachineCards(dashboardData);
             } catch (err) {
-                document.getElementById('loading-indicator').innerHTML = `<span class="text-red-500">Gagal memuat data: ${err.message}</span>`;
+                const errorContainer = document.getElementById('loading-indicator');
+                errorContainer.classList.remove('animate-pulse');
+                errorContainer.innerHTML = `
+                    <div class="bg-red-900/50 p-4 rounded-lg inline-block border border-red-800">
+                        <p class="font-bold text-red-300 mb-1">Gagal Memuat Dashboard</p>
+                        <p class="text-sm text-gray-300">${err.message}</p>
+                    </div>
+                `;
             }
         }
 
@@ -331,37 +452,32 @@
             const grid = document.getElementById('machine-grid');
             grid.innerHTML = '';
 
+            if (data.length === 0) {
+                grid.innerHTML = '<div class="col-span-full text-center text-gray-500">Tidak ada data mesin ditemukan. Cek nama sheet "dashboardproses".</div>';
+                return;
+            }
+
             data.forEach((row, index) => {
-                // Mapping Data (Sesuaikan dengan nama kolom di Sheet Anda jika berbeda)
-                // Fallback logic untuk nama kolom
                 const namaMesin = row['MESIN'] || row['NAME'] || `Mesin ${index+1}`;
-                
-                // Parsing Angka
                 const qtySelesai = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
                 const waitProses = parseFloat(row['WAIT PROSES'] || row['WAIT_PROSES'] || 0);
-                // Jika sheet punya kolom Target, gunakan. Jika tidak, target = selesai + wait
                 const target = parseFloat(row['TARGET'] || (qtySelesai + waitProses)); 
                 
-                // Hitung Persentase
                 let percentage = 0;
                 if (target > 0) {
                     percentage = Math.round((qtySelesai / target) * 100);
                 }
 
-                // ID Unik untuk Canvas Chart
                 const canvasId = `chart-${index}`;
+                let progressColor = '#eab308'; // Default Kuning
+                if (percentage >= 90) progressColor = '#22c55e'; // Hijau
+                if (percentage < 30) progressColor = '#ef4444'; // Merah
 
-                // Warna Indikator berdasarkan persentase
-                let progressColor = '#eab308'; // Default Kuning (seperti gambar)
-                if (percentage >= 90) progressColor = '#22c55e'; // Hijau jika excellent
-                if (percentage < 30) progressColor = '#ef4444'; // Merah jika rendah
-
-                // HTML Kartu
                 const cardHtml = `
                     <div class="process-card hover:bg-zinc-750 transition transform hover:-translate-y-1">
                         <div class="flex justify-between items-center mb-2">
-                            <h3 class="text-xl font-bold text-white">${namaMesin}</h3>
-                            <span class="text-sm font-mono text-gray-400">${qtySelesai} / ${target}</span>
+                            <h3 class="text-xl font-bold text-white truncate" title="${namaMesin}">${namaMesin}</h3>
+                            <span class="text-sm font-mono text-gray-400 whitespace-nowrap">${qtySelesai} / ${target}</span>
                         </div>
                         
                         <div class="chart-wrapper">
@@ -382,8 +498,6 @@
                     </div>
                 `;
                 grid.innerHTML += cardHtml;
-
-                // Create Chart setelah elemen masuk DOM (gunakan setTimeout agar render UI selesai dulu)
                 setTimeout(() => {
                     initChart(canvasId, qtySelesai, (target - qtySelesai), progressColor);
                 }, 0);
@@ -393,17 +507,14 @@
         function initChart(canvasId, valCompleted, valRemaining, color) {
             const ctx = document.getElementById(canvasId);
             if (!ctx) return;
-
-            // Pastikan sisa tidak minus (jika over target)
             if (valRemaining < 0) valRemaining = 0;
-
             chartInstances[canvasId] = new Chart(ctx, {
                 type: 'doughnut',
                 data: {
                     labels: ['Selesai', 'Sisa'],
                     datasets: [{
                         data: [valCompleted, valRemaining],
-                        backgroundColor: [color, '#52525b'], // Warna Progress, Warna Track (Zinc 600)
+                        backgroundColor: [color, '#52525b'],
                         borderWidth: 0,
                         hoverOffset: 4
                     }]
@@ -411,21 +522,16 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    cutout: '75%', // Ketebalan donat
-                    plugins: {
-                        legend: { display: false },
-                        tooltip: { enabled: false } // Matikan tooltip agar bersih seperti dashboard monitor
-                    }
+                    cutout: '75%', 
+                    plugins: { legend: { display: false }, tooltip: { enabled: false } }
                 }
             });
         }
 
-        // --- 6. HALAMAN KONTROL MESIN (INPUT DATA) ---
+        // --- 7. HALAMAN KONTROL MESIN ---
         function renderKontrolMesin() {
             const container = document.getElementById('app-container');
             
-            // Ambil daftar mesin dari data dashboard yang sudah di-fetch (cache)
-            // Jika belum ada, tampilkan loading/fetch ulang
             let optionsHtml = '<option value="">-- Pilih Mesin --</option>';
             if (dashboardData.length > 0) {
                 dashboardData.forEach(row => {
@@ -435,7 +541,9 @@
             } else {
                 fetchSheetData(SHEETS.DASHBOARD).then(res => {
                     dashboardData = res.data;
-                    renderKontrolMesin(); // Re-render setelah data ada
+                    renderKontrolMesin(); 
+                }).catch(e => {
+                    optionsHtml = '<option value="">Gagal memuat list mesin</option>';
                 });
                 optionsHtml = '<option>Memuat data mesin...</option>';
             }
@@ -443,12 +551,8 @@
             container.innerHTML = `
                 <div class="app-view p-6 max-w-4xl mx-auto">
                     ${createHeader('Kontrol Mesin', 'Update Status & Output')}
-                    <button onclick="navigate('dashboard')" class="mb-6 text-gray-400 hover:text-green-400 flex items-center">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-                        Kembali ke Dashboard
-                    </button>
-
-                    <div class="bg-zinc-800 p-8 rounded-xl shadow-lg border-l-4 border-blue-500">
+                    
+                    <div class="bg-zinc-800 p-8 rounded-xl shadow-lg border-l-4 border-red-500">
                         <form onsubmit="handleSubmitData(event)">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                                 <div>
@@ -475,7 +579,7 @@
                                 </div>
                             </div>
                             <div id="form-feedback" class="hidden mb-4 p-3 rounded text-sm text-center font-bold"></div>
-                            <button type="submit" id="btn-submit" class="w-full btn-primary bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700">
+                            <button type="submit" id="btn-submit" class="w-full btn-primary bg-red-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-red-700">
                                 KIRIM UPDATE
                             </button>
                         </form>
@@ -492,7 +596,7 @@
             
             const formData = new FormData(form);
             const payload = {
-                action: 'UPDATE_PRODUKSI', // Tag agar Web App Script tahu ini update apa
+                action: 'UPDATE_PRODUKSI', 
                 mesin: formData.get('mesin'),
                 jenis: formData.get('jenis'),
                 nilai: formData.get('nilai'),
@@ -506,8 +610,6 @@
             feedback.classList.add('hidden');
 
             try {
-                // Mengirim data ke Web App Google Script
-                // mode: 'no-cors' digunakan karena keterbatasan CORS pada Google Apps Script default
                 await fetch(WEB_APP_URL, {
                     method: 'POST',
                     mode: 'no-cors',
@@ -515,14 +617,10 @@
                     body: JSON.stringify(payload)
                 });
 
-                // Karena no-cors, kita tidak bisa baca response. Asumsikan sukses jika tidak error network.
                 feedback.textContent = 'Data Berhasil Dikirim!';
                 feedback.className = 'mb-4 p-3 rounded text-sm text-center font-bold bg-green-900 text-green-200 block';
                 form.reset();
-                
-                // Clear cache dashboard agar data baru terambil nanti
                 dashboardData = []; 
-
             } catch (err) {
                 feedback.textContent = 'Gagal mengirim data. Cek koneksi.';
                 feedback.className = 'mb-4 p-3 rounded text-sm text-center font-bold bg-red-900 text-red-200 block';
@@ -532,16 +630,13 @@
             }
         }
 
-        // --- 7. HALAMAN DETAIL PROGRESS (TABEL) ---
+        // --- 8. HALAMAN DETAIL PROGRESS ---
         async function renderDetailProgress() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
                     ${createHeader('Detail Progress', 'Data Mentah Produksi')}
-                    <button onclick="navigate('dashboard')" class="mb-4 text-gray-400 hover:text-green-400 flex items-center">
-                        <svg class="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> Kembali
-                    </button>
-                    <div class="overflow-x-auto shadow-lg rounded-xl">
+                    <div class="overflow-x-auto shadow-lg rounded-xl border-l-4 border-emerald-500">
                         <table class="monitor-table w-full text-left text-sm text-gray-300">
                             <thead class="bg-zinc-900 uppercase text-xs font-bold text-gray-400">
                                 <tr id="table-head"></tr>
@@ -555,39 +650,33 @@
             `;
 
             try {
-                // Selalu fetch fresh data untuk tabel
                 const result = await fetchSheetData(SHEETS.DASHBOARD);
                 const headers = result.headers;
                 const data = result.data;
-
                 const thead = document.getElementById('table-head');
                 const tbody = document.getElementById('table-body');
-
-                thead.innerHTML = headers.map(h => `<th class="px-6 py-4 border-b border-zinc-700">${h}</th>`).join('');
-                
+                thead.innerHTML = headers.map(h => `<th class="px-6 py-4 border-b border-zinc-700 whitespace-nowrap">${h}</th>`).join('');
                 if (data.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="${headers.length}" class="p-6 text-center text-gray-500">Data kosong.</td></tr>`;
                     return;
                 }
-
                 tbody.innerHTML = data.map(row => `
                     <tr class="hover:bg-zinc-700 transition">
                         ${headers.map(h => `<td class="px-6 py-4 whitespace-nowrap">${row[h]}</td>`).join('')}
                     </tr>
                 `).join('');
-
             } catch (err) {
-                document.getElementById('table-body').innerHTML = `<tr><td class="p-4 text-center text-red-500">Gagal: ${err.message}</td></tr>`;
+                document.getElementById('table-body').innerHTML = `<tr><td class="p-4 text-center text-red-500 font-bold">Gagal: ${err.message}</td></tr>`;
             }
         }
 
-        // --- 8. HALAMAN INFORMASI & ABOUT ---
+        // --- 9. HALAMAN INFORMASI ---
         function renderInformasi() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-4xl mx-auto">
                     ${createHeader('Informasi', 'Panduan Operator')}
-                    <div class="bg-zinc-800 p-8 rounded-xl shadow-lg text-gray-300 space-y-4">
+                    <div class="bg-zinc-800 p-8 rounded-xl shadow-lg text-gray-300 space-y-4 border-l-4 border-cyan-500">
                         <h3 class="text-xl font-bold text-white">Cara Membaca Dashboard</h3>
                         <ul class="list-disc pl-5 space-y-2">
                             <li><strong>Grafik Donut:</strong> Menunjukkan persentase penyelesaian target hari ini.</li>
@@ -597,49 +686,43 @@
                         </ul>
                         <div class="border-t border-gray-700 my-4"></div>
                         <h3 class="text-xl font-bold text-white">Prosedur Update Data</h3>
-                        <p>Setiap operator wajib melakukan update data melalui menu "Kontrol Mesin" setiap:</p>
+                        <p>Operator atau Admin wajib melakukan update data melalui menu "Kontrol Mesin" setiap:</p>
                         <ol class="list-decimal pl-5 space-y-1">
                             <li>Pergantian Shift.</li>
                             <li>Mesin Breakdown/Stop lebih dari 15 menit.</li>
                             <li>Pencapaian output per jam.</li>
                         </ol>
-                        <div class="mt-6 text-right">
-                             <button onclick="navigate('dashboard')" class="text-green-400 hover:underline">Kembali ke Dashboard</button>
-                        </div>
                     </div>
                 </div>
             `;
         }
 
+        // --- 10. HALAMAN ABOUT ---
         function renderAbout() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-4xl mx-auto">
-                    ${createHeader('About Aplikasi', 'Versi 1.0')}
-                    <div class="bg-zinc-800 p-8 rounded-xl shadow-lg text-center">
-                        <img src="https://cdn-icons-png.flaticon.com/512/2920/2920349.png" class="h-20 w-20 mx-auto filter invert mb-4 opacity-50" alt="Logo">
+                    ${createHeader('About Aplikasi', 'Versi 1.2')}
+                    <div class="bg-zinc-800 p-8 rounded-xl shadow-lg text-center border-l-4 border-purple-500">
+                        <div class="h-20 w-20 bg-green-900 rounded-full mx-auto flex items-center justify-center mb-4">
+                             <span class="text-4xl">📊</span>
+                        </div>
                         <h2 class="text-2xl font-bold text-white mb-2">Monitoring Production System</h2>
                         <p class="text-gray-400 mb-6">Dikembangkan untuk memantau efisiensi (OEE) dan output line produksi secara real-time.</p>
                         
                         <div class="grid grid-cols-2 gap-4 text-left max-w-md mx-auto text-sm bg-zinc-900 p-4 rounded-lg border border-zinc-700">
-                            <div class="text-gray-500">Versi</div><div class="text-white">1.0.0 (Beta)</div>
+                            <div class="text-gray-500">Versi</div><div class="text-white">1.2.0 (RBAC Enabled)</div>
                             <div class="text-gray-500">Database</div><div class="text-white">Google Sheets</div>
-                            <div class="text-gray-500">Framework</div><div class="text-white">Tailwind & Vanilla JS</div>
-                            <div class="text-gray-500">Developer</div><div class="text-white">IT Support</div>
-                        </div>
-
-                         <div class="mt-8">
-                             <button onclick="navigate('dashboard')" class="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">Kembali</button>
+                            <div class="text-gray-500">Status</div><div class="text-green-400">Online</div>
                         </div>
                     </div>
                 </div>
             `;
         }
 
-        // Global functions
         window.navigate = navigate;
         window.handleLoginSubmit = handleLoginSubmit;
-        window.renderDashboard = renderDashboard;
+        window.renderMonitorDashboard = renderMonitorDashboard;
         window.handleSubmitData = handleSubmitData;
         window.handleLogout = () => {
             sessionStorage.removeItem('monitorUser');
@@ -647,12 +730,12 @@
             navigate('login');
         };
 
-        // --- INIT ---
         window.onload = () => {
             const storedUser = sessionStorage.getItem('monitorUser');
             if (storedUser) {
                 currentUser = JSON.parse(storedUser);
-                navigate(localStorage.getItem('currentMonitorPage') || 'dashboard');
+                // Jika refresh, kembali ke menu utama untuk keamanan/konsistensi UI
+                navigate('mainMenu'); 
             } else {
                 navigate('login');
             }
