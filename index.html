@@ -97,6 +97,17 @@
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
             border-top: 4px solid #22c55e;
         }
+        .summary-card {
+            background-color: #27272a;
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            position: relative;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.5);
+            border-left: 4px solid;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
         .chart-wrapper {
             position: relative;
             height: 160px;
@@ -156,6 +167,12 @@
         
         // --- 2. FUNGSI UTILITAS (FETCH & PARSE) ---
         
+        // Fungsi helper untuk format angka ribuan (contoh: 1,235)
+        function formatNumber(num) {
+            if (num === null || num === undefined || isNaN(num)) return '0';
+            return parseFloat(num).toLocaleString('en-US');
+        }
+
         async function fetchSheetData(sheetName) {
             const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
             try {
@@ -306,12 +323,10 @@
                 );
 
                 if (user) {
-                    // Simpan user dan role
-                    // Default role 'User' jika kosong
                     const role = String(user.ROLE || 'User').trim(); 
                     currentUser = { username: user.USERNAME, role: role };
                     sessionStorage.setItem('monitorUser', JSON.stringify(currentUser));
-                    navigate('mainMenu'); // Masuk ke Menu Utama
+                    navigate('mainMenu'); 
                 } else {
                     throw new Error('Username atau Password salah');
                 }
@@ -328,13 +343,12 @@
             const container = document.getElementById('app-container');
             const userRole = currentUser ? currentUser.role : 'User';
             
-            // Definisi Menu Items
             const allMenuItems = [
                 {
                     id: 'monitorDashboard',
                     title: 'DASHBOARD MONITOR',
                     desc: 'Status Efisiensi Mesin Realtime',
-                    color: 'blue', // border-blue-500
+                    color: 'blue',
                     icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>',
                     roles: ['Administrator', 'User']
                 },
@@ -342,7 +356,7 @@
                     id: 'kontrolMesin',
                     title: 'KONTROL MESIN',
                     desc: 'Update Status & Output Produksi',
-                    color: 'red', // border-red-500 (Admin Only)
+                    color: 'red',
                     icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path>',
                     roles: ['Administrator'] 
                 },
@@ -350,7 +364,7 @@
                     id: 'detailProgress',
                     title: 'DETAIL PROGRESS',
                     desc: 'Tabel Data Produksi Lengkap',
-                    color: 'emerald', // border-emerald-500
+                    color: 'emerald',
                     icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>',
                     roles: ['Administrator', 'User']
                 },
@@ -358,7 +372,7 @@
                     id: 'informasi',
                     title: 'INFORMASI',
                     desc: 'Panduan & SOP Operator',
-                    color: 'cyan', // border-cyan-500
+                    color: 'cyan',
                     icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>',
                     roles: ['Administrator', 'User']
                 },
@@ -366,21 +380,17 @@
                     id: 'about',
                     title: 'ABOUT APLIKASI',
                     desc: 'Versi & Info Pengembang',
-                    color: 'purple', // border-purple-500
+                    color: 'purple',
                     icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>',
                     roles: ['Administrator', 'User']
                 }
             ];
 
-            // Filter Menu berdasarkan Role
             const allowedItems = allMenuItems.filter(item => {
-                // Jika role user adalah 'Administrator', tampilkan semua.
-                // Jika tidak, cek apakah role user ada di list roles item tersebut.
                 if (userRole === 'Administrator') return true;
                 return item.roles.includes(userRole);
             });
 
-            // Generate HTML Cards
             const cardsHtml = allowedItems.map(item => `
                 <div onclick="navigate('${item.id}')" class="menu-card border-${item.color}-500 group">
                     <div class="icon-wrapper text-${item.color}-500 group-hover:text-white transition-colors">
@@ -395,12 +405,10 @@
 
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
-                    ${createHeader('MENU UTAMA', 'Pilih menu untuk melanjutkan', false)} <!-- false = hide back button -->
-                    
+                    ${createHeader('MENU UTAMA', 'Pilih menu untuk melanjutkan', false)}
                     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-10">
                         ${cardsHtml}
                     </div>
-                    
                     <footer class="mt-20 text-center text-xs text-gray-600">
                         Aplikasi Monitoring Produksi v1.2
                     </footer>
@@ -420,6 +428,11 @@
                         Mengambil data Live dari Line Produksi...
                     </div>
 
+                    <!-- Area Summary Card (Header Dashboard) -->
+                    <div id="summary-section" class="hidden grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <!-- Content will be injected by JS -->
+                    </div>
+
                     <!-- Grid Kartu Mesin -->
                     <div id="machine-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
                     
@@ -435,6 +448,8 @@
                 dashboardHeaders = result.headers;
                 
                 document.getElementById('loading-indicator').classList.add('hidden');
+                
+                // Render Cards
                 renderMachineCards(dashboardData);
             } catch (err) {
                 const errorContainer = document.getElementById('loading-indicator');
@@ -450,13 +465,84 @@
 
         function renderMachineCards(data) {
             const grid = document.getElementById('machine-grid');
+            const summarySection = document.getElementById('summary-section');
             grid.innerHTML = '';
+            summarySection.innerHTML = '';
 
             if (data.length === 0) {
                 grid.innerHTML = '<div class="col-span-full text-center text-gray-500">Tidak ada data mesin ditemukan. Cek nama sheet "dashboardproses".</div>';
                 return;
             }
 
+            // --- HITUNG SUMMARY DATA ---
+            let totalQtySelesai = 0;
+            let totalTarget = 0;
+            
+            data.forEach(row => {
+                const qty = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
+                const wait = parseFloat(row['WAIT PROSES'] || row['WAIT_PROSES'] || 0);
+                // Hitung target per baris (jika kolom TARGET tidak ada, asumsi Qty+Wait)
+                const trg = parseFloat(row['TARGET'] || (qty + wait));
+                
+                totalQtySelesai += qty;
+                totalTarget += trg;
+            });
+
+            // Hitung Persentase Total
+            let totalPercentage = 0;
+            if (totalTarget > 0) {
+                totalPercentage = Math.round((totalQtySelesai / totalTarget) * 100);
+            }
+
+            // --- RENDER SUMMARY CARDS ---
+            summarySection.classList.remove('hidden');
+            summarySection.innerHTML = `
+                <!-- Card 1: Total Qty Selesai -->
+                <div class="summary-card border-emerald-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium uppercase tracking-wider">Total Qty Selesai</p>
+                            <h3 class="text-3xl font-bold text-white mt-1">${formatNumber(totalQtySelesai)}</h3>
+                        </div>
+                        <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                    </div>
+                    <p class="text-xs text-emerald-400 mt-4">Actual Output</p>
+                </div>
+
+                <!-- Card 2: Total Plan Qty -->
+                <div class="summary-card border-blue-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium uppercase tracking-wider">Total Plan Qty</p>
+                            <h3 class="text-3xl font-bold text-white mt-1">${formatNumber(totalTarget)}</h3>
+                        </div>
+                        <div class="p-2 bg-blue-500/10 rounded-lg text-blue-500">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
+                        </div>
+                    </div>
+                    <p class="text-xs text-blue-400 mt-4">Target Production</p>
+                </div>
+
+                <!-- Card 3: Persentase -->
+                <div class="summary-card border-purple-500">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="text-gray-400 text-sm font-medium uppercase tracking-wider">Pencapaian Total</p>
+                            <h3 class="text-3xl font-bold text-white mt-1">${totalPercentage}%</h3>
+                        </div>
+                        <div class="p-2 bg-purple-500/10 rounded-lg text-purple-500">
+                            <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 3.055A9.001 9.001 0 1020.945 13H11V3.055z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20.488 9H15V3.512A9.025 9.025 0 0120.488 9z"></path></svg>
+                        </div>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-1.5 mt-4">
+                        <div class="bg-purple-500 h-1.5 rounded-full" style="width: ${totalPercentage > 100 ? 100 : totalPercentage}%"></div>
+                    </div>
+                </div>
+            `;
+
+            // --- RENDER MACHINE CARDS ---
             data.forEach((row, index) => {
                 const namaMesin = row['MESIN'] || row['NAME'] || `Mesin ${index+1}`;
                 const qtySelesai = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
@@ -477,7 +563,7 @@
                     <div class="process-card hover:bg-zinc-750 transition transform hover:-translate-y-1">
                         <div class="flex justify-between items-center mb-2">
                             <h3 class="text-xl font-bold text-white truncate" title="${namaMesin}">${namaMesin}</h3>
-                            <span class="text-sm font-mono text-gray-400 whitespace-nowrap">${qtySelesai} / ${target}</span>
+                            <span class="text-sm font-mono text-gray-400 whitespace-nowrap">${formatNumber(qtySelesai)} / ${formatNumber(target)}</span>
                         </div>
                         
                         <div class="chart-wrapper">
@@ -488,11 +574,11 @@
                         <div class="flex justify-between items-end mt-2 text-xs text-gray-400 border-t border-gray-700 pt-2">
                             <div>
                                 <p>Qty Selesai</p>
-                                <p class="text-lg font-bold text-white">${qtySelesai}</p>
+                                <p class="text-lg font-bold text-white">${formatNumber(qtySelesai)}</p>
                             </div>
                             <div class="text-right">
                                 <p>Wait Proses</p>
-                                <p class="text-lg font-bold text-gray-300">${waitProses}</p>
+                                <p class="text-lg font-bold text-gray-300">${formatNumber(waitProses)}</p>
                             </div>
                         </div>
                     </div>
