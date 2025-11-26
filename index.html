@@ -157,17 +157,19 @@
         
         const SHEETS = {
             DASHBOARD: 'dashboardproses',
-            USER: 'Usercontrol'
+            DETAIL: 'detailprogress',
+            USER: 'Usercontrol',
+            PLAN: 'planproses' // Ditambahkan Sheet Plan Proses
         };
 
         let currentUser = null;
         let dashboardData = [];
         let dashboardHeaders = [];
         let chartInstances = {}; 
+        let selectedMachine = null; // Menyimpan mesin yang dipilih untuk detail
         
         // --- 2. FUNGSI UTILITAS (FETCH & PARSE) ---
         
-        // Fungsi helper untuk format angka ribuan (contoh: 1,235)
         function formatNumber(num) {
             if (num === null || num === undefined || isNaN(num)) return '0';
             return parseFloat(num).toLocaleString('en-US');
@@ -229,8 +231,9 @@
 
             switch (page) {
                 case 'login': renderLogin(); break;
-                case 'mainMenu': renderMainMenu(); break; // Halaman Utama Baru
-                case 'monitorDashboard': renderMonitorDashboard(); break; // Dashboard Gauge
+                case 'mainMenu': renderMainMenu(); break;
+                case 'monitorDashboard': renderMonitorDashboard(); break;
+                case 'detailMesin': renderDetailMesin(); break; // Halaman Detail Mesin Baru
                 case 'kontrolMesin': renderKontrolMesin(); break;
                 case 'detailProgress': renderDetailProgress(); break;
                 case 'informasi': renderInformasi(); break;
@@ -239,14 +242,14 @@
             }
         }
 
-        function createHeader(title, subtitle = '', showBackBtn = true) {
+        function createHeader(title, subtitle = '', showBackBtn = true, backDestination = 'mainMenu') {
             const username = currentUser ? currentUser.username : 'Guest';
             const role = currentUser ? currentUser.role : '';
             
             let backButtonHtml = '';
             if (showBackBtn) {
                 backButtonHtml = `
-                    <button onclick="navigate('mainMenu')" class="mr-4 text-gray-400 hover:text-white transition">
+                    <button onclick="navigate('${backDestination}')" class="mr-4 text-gray-400 hover:text-white transition">
                         <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                     </button>
                 `;
@@ -277,7 +280,15 @@
             `;
         }
 
-        // --- 4. HALAMAN LOGIN ---
+        // --- 4. LOGIC PILIH MESIN ---
+        
+        window.openMachineDetail = (namaMesin) => {
+            selectedMachine = namaMesin;
+            navigate('detailMesin');
+        };
+
+        // --- 5. RENDER HALAMAN ---
+
         function renderLogin() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
@@ -338,7 +349,6 @@
             }
         }
 
-        // --- 5. HALAMAN MAIN MENU (CARD BASED) ---
         function renderMainMenu() {
             const container = document.getElementById('app-container');
             const userRole = currentUser ? currentUser.role : 'User';
@@ -417,21 +427,19 @@
         }
 
 
-        // --- 6. HALAMAN MONITOR DASHBOARD (GAUGE/DONUT) ---
+        // --- HALAMAN MONITOR DASHBOARD (GAUGE/DONUT) ---
         async function renderMonitorDashboard() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
-                    ${createHeader('Dashboard Monitor', 'Status Efisiensi dan Output Mesin')}
+                    ${createHeader('Dashboard Monitor', 'Klik kartu untuk melihat detail plan')}
                     
                     <div id="loading-indicator" class="text-center py-10 text-gray-400 animate-pulse">
                         Mengambil data Live dari Line Produksi...
                     </div>
 
-                    <!-- Area Summary Card (Header Dashboard) -->
-                    <div id="summary-section" class="hidden grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-                        <!-- Content will be injected by JS -->
-                    </div>
+                    <!-- Area Summary Card -->
+                    <div id="summary-section" class="hidden grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"></div>
 
                     <!-- Grid Kartu Mesin -->
                     <div id="machine-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
@@ -449,7 +457,6 @@
                 
                 document.getElementById('loading-indicator').classList.add('hidden');
                 
-                // Render Cards
                 renderMachineCards(dashboardData);
             } catch (err) {
                 const errorContainer = document.getElementById('loading-indicator');
@@ -481,14 +488,12 @@
             data.forEach(row => {
                 const qty = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
                 const wait = parseFloat(row['WAIT PROSES'] || row['WAIT_PROSES'] || 0);
-                // Hitung target per baris (jika kolom TARGET tidak ada, asumsi Qty+Wait)
                 const trg = parseFloat(row['TARGET'] || (qty + wait));
                 
                 totalQtySelesai += qty;
                 totalTarget += trg;
             });
 
-            // Hitung Persentase Total
             let totalPercentage = 0;
             if (totalTarget > 0) {
                 totalPercentage = Math.round((totalQtySelesai / totalTarget) * 100);
@@ -497,7 +502,6 @@
             // --- RENDER SUMMARY CARDS ---
             summarySection.classList.remove('hidden');
             summarySection.innerHTML = `
-                <!-- Card 1: Total Qty Selesai -->
                 <div class="summary-card border-emerald-500">
                     <div class="flex justify-between items-start">
                         <div>
@@ -511,7 +515,6 @@
                     <p class="text-xs text-emerald-400 mt-4">Actual Output</p>
                 </div>
 
-                <!-- Card 2: Total Plan Qty -->
                 <div class="summary-card border-blue-500">
                     <div class="flex justify-between items-start">
                         <div>
@@ -525,7 +528,6 @@
                     <p class="text-xs text-blue-400 mt-4">Target Production</p>
                 </div>
 
-                <!-- Card 3: Persentase -->
                 <div class="summary-card border-purple-500">
                     <div class="flex justify-between items-start">
                         <div>
@@ -542,7 +544,7 @@
                 </div>
             `;
 
-            // --- RENDER MACHINE CARDS ---
+            // --- RENDER MACHINE CARDS (CLICKABLE) ---
             data.forEach((row, index) => {
                 const namaMesin = row['MESIN'] || row['NAME'] || `Mesin ${index+1}`;
                 const qtySelesai = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
@@ -555,12 +557,13 @@
                 }
 
                 const canvasId = `chart-${index}`;
-                let progressColor = '#eab308'; // Default Kuning
-                if (percentage >= 90) progressColor = '#22c55e'; // Hijau
-                if (percentage < 30) progressColor = '#ef4444'; // Merah
+                let progressColor = '#eab308'; 
+                if (percentage >= 90) progressColor = '#22c55e';
+                if (percentage < 30) progressColor = '#ef4444';
 
+                // Tambahkan event onclick openMachineDetail
                 const cardHtml = `
-                    <div class="process-card hover:bg-zinc-750 transition transform hover:-translate-y-1">
+                    <div onclick="openMachineDetail('${namaMesin}')" class="process-card cursor-pointer hover:bg-zinc-750 transition transform hover:-translate-y-1 hover:ring-2 hover:ring-green-500/50">
                         <div class="flex justify-between items-center mb-2">
                             <h3 class="text-xl font-bold text-white truncate" title="${namaMesin}">${namaMesin}</h3>
                             <span class="text-sm font-mono text-gray-400 whitespace-nowrap">${formatNumber(qtySelesai)} / ${formatNumber(target)}</span>
@@ -614,7 +617,85 @@
             });
         }
 
-        // --- 7. HALAMAN KONTROL MESIN ---
+        // --- HALAMAN DETAIL MESIN (BARU) ---
+        async function renderDetailMesin() {
+            const container = document.getElementById('app-container');
+            if (!selectedMachine) {
+                navigate('monitorDashboard');
+                return;
+            }
+
+            container.innerHTML = `
+                <div class="app-view p-6 max-w-7xl mx-auto">
+                    ${createHeader(`Detail Plan: ${selectedMachine}`, 'Monitoring Parameter Plan Proses', true, 'monitorDashboard')}
+                    
+                    <div class="overflow-x-auto shadow-lg rounded-xl border-l-4 border-yellow-500 bg-zinc-800">
+                         <div class="p-4 border-b border-zinc-700 flex justify-between items-center bg-zinc-900">
+                             <h3 class="text-lg font-bold text-yellow-500">Log Plan Proses</h3>
+                             <span class="text-xs text-gray-500">Sheet: planproses</span>
+                         </div>
+                        <table class="monitor-table w-full text-left text-sm text-gray-300">
+                            <thead class="bg-zinc-900 uppercase text-xs font-bold text-gray-400 border-b border-zinc-700">
+                                <tr>
+                                    <th class="px-6 py-4">Start</th>
+                                    <th class="px-6 py-4">Finish</th>
+                                    <th class="px-6 py-4">Time Proses</th>
+                                    <th class="px-6 py-4">Ton/Hour</th>
+                                </tr>
+                            </thead>
+                            <tbody id="detail-body" class="divide-y divide-zinc-700">
+                                <tr><td colspan="4" class="p-6 text-center animate-pulse">Memuat data plan...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            `;
+
+            try {
+                const result = await fetchSheetData(SHEETS.PLAN);
+                const data = result.data;
+                const tbody = document.getElementById('detail-body');
+                
+                // Filter data berdasarkan Mesin yang dipilih
+                // Kita normalisasi pencarian kolom untuk menghindari case sensitivity
+                const filteredData = data.filter(row => {
+                    const mesinVal = row['MESIN'] || row['NAME'] || '';
+                    return mesinVal === selectedMachine;
+                });
+
+                if (filteredData.length === 0) {
+                    tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-500">Tidak ada data plan untuk mesin ${selectedMachine}.</td></tr>`;
+                    return;
+                }
+
+                tbody.innerHTML = filteredData.map(row => {
+                    // Mapping kolom secara manual berdasarkan request user
+                    // Menggunakan fallback jika nama kolom di sheet sedikit berbeda (misal underscore vs spasi)
+                    const start = row['START'] || row['MULAI'] || '-';
+                    const finish = row['FINISH'] || row['SELESAI'] || '-';
+                    const timeProses = row['TIME PROSES'] || row['TIME_PROSES'] || row['DURASI'] || '-';
+                    const tonHour = row['TON/HOUR'] || row['TON_HOUR'] || row['OUTPUT'] || '-';
+
+                    return `
+                        <tr class="hover:bg-zinc-700 transition">
+                            <td class="px-6 py-4 whitespace-nowrap font-mono text-white">${start}</td>
+                            <td class="px-6 py-4 whitespace-nowrap font-mono text-white">${finish}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-yellow-400 font-bold">${timeProses}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-green-400 font-bold">${tonHour}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                document.getElementById('detail-body').innerHTML = `
+                    <tr><td colspan="4" class="p-6 text-center text-red-500">
+                        Gagal memuat data: ${err.message}<br>
+                        <small class="text-gray-500">Pastikan sheet bernama "planproses" ada.</small>
+                    </td></tr>`;
+            }
+        }
+
+        // --- HALAMAN KONTROL MESIN ---
         function renderKontrolMesin() {
             const container = document.getElementById('app-container');
             
@@ -716,7 +797,7 @@
             }
         }
 
-        // --- 8. HALAMAN DETAIL PROGRESS ---
+        // --- HALAMAN DETAIL PROGRESS ---
         async function renderDetailProgress() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
@@ -724,7 +805,7 @@
                     ${createHeader('Detail Progress', 'Data Mentah Produksi')}
                     <div class="overflow-x-auto shadow-lg rounded-xl border-l-4 border-emerald-500">
                         <table class="monitor-table w-full text-left text-sm text-gray-300">
-                            <thead class="bg-zinc-900 uppercase text-xs font-bold text-gray-400">
+                            <thead class="bg-zinc-900 uppercase text-xs font-bold text-gray-400 border-b-2 border-emerald-500/50">
                                 <tr id="table-head"></tr>
                             </thead>
                             <tbody id="table-body" class="divide-y divide-zinc-700">
@@ -736,16 +817,19 @@
             `;
 
             try {
-                const result = await fetchSheetData(SHEETS.DASHBOARD);
+                const result = await fetchSheetData(SHEETS.DETAIL);
                 const headers = result.headers;
                 const data = result.data;
                 const thead = document.getElementById('table-head');
                 const tbody = document.getElementById('table-body');
-                thead.innerHTML = headers.map(h => `<th class="px-6 py-4 border-b border-zinc-700 whitespace-nowrap">${h}</th>`).join('');
+                
+                thead.innerHTML = headers.map(h => `<th class="px-6 py-4 whitespace-nowrap">${h}</th>`).join('');
+                
                 if (data.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="${headers.length}" class="p-6 text-center text-gray-500">Data kosong.</td></tr>`;
                     return;
                 }
+                
                 tbody.innerHTML = data.map(row => `
                     <tr class="hover:bg-zinc-700 transition">
                         ${headers.map(h => `<td class="px-6 py-4 whitespace-nowrap">${row[h]}</td>`).join('')}
@@ -756,7 +840,7 @@
             }
         }
 
-        // --- 9. HALAMAN INFORMASI ---
+        // --- HALAMAN INFORMASI ---
         function renderInformasi() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
@@ -783,7 +867,7 @@
             `;
         }
 
-        // --- 10. HALAMAN ABOUT ---
+        // --- HALAMAN ABOUT ---
         function renderAbout() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
@@ -810,6 +894,7 @@
         window.handleLoginSubmit = handleLoginSubmit;
         window.renderMonitorDashboard = renderMonitorDashboard;
         window.handleSubmitData = handleSubmitData;
+        window.openMachineDetail = openMachineDetail;
         window.handleLogout = () => {
             sessionStorage.removeItem('monitorUser');
             currentUser = null;
@@ -820,7 +905,6 @@
             const storedUser = sessionStorage.getItem('monitorUser');
             if (storedUser) {
                 currentUser = JSON.parse(storedUser);
-                // Jika refresh, kembali ke menu utama untuk keamanan/konsistensi UI
                 navigate('mainMenu'); 
             } else {
                 navigate('login');
