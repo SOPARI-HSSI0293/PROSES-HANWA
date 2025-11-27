@@ -70,13 +70,16 @@
         /* Style Tabel */
         .monitor-table {
             background-color: #27272a;
+            border-collapse: separate; /* Penting untuk sticky header */
+            border-spacing: 0;
         }
         .monitor-table th {
-            background-color: #18181b;
+            background-color: #18181b; /* Warna latar header agar tidak transparan */
             color: #9ca3af;
             position: sticky;
             top: 0;
-            z-index: 10;
+            z-index: 20; /* Z-index lebih tinggi */
+            border-bottom: 2px solid #3f3f46;
         }
 
         /* Style Tombol */
@@ -154,6 +157,22 @@
             height: 0.5rem;
             margin-right: 0.5rem;
             border-radius: 2px;
+        }
+
+        /* Scrollbar custom untuk tabel */
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #27272a; 
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #52525b; 
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #71717a; 
         }
     </style>
 </head>
@@ -635,7 +654,7 @@
             });
         }
 
-        // --- HALAMAN DETAIL MESIN (PERBAIKAN: GRAFIK MENYATU & LOGIKA GAP) ---
+        // --- HALAMAN DETAIL MESIN (PERBAIKAN: GRAFIK MENYATU & LOGIKA GAP AWAL & TABEL FIX) ---
         async function renderDetailMesin() {
             const container = document.getElementById('app-container');
             if (!selectedMachine) {
@@ -660,16 +679,18 @@
                         <div id="timeline-debug" class="text-center text-xs text-gray-500 mt-2 font-mono"></div>
                     </div>
 
-                    <div class="overflow-x-auto shadow-lg rounded-xl border-l-4 border-yellow-500 bg-zinc-800">
-                         <div class="p-4 border-b border-zinc-700 flex justify-between items-center bg-zinc-900">
+                    <div class="rounded-xl border-l-4 border-yellow-500 bg-zinc-800 shadow-lg flex flex-col h-[500px]">
+                         <div class="p-4 border-b border-zinc-700 flex justify-between items-center bg-zinc-900 flex-shrink-0">
                              <h3 class="text-lg font-bold text-yellow-500">Log Plan Proses</h3>
                          </div>
-                        <table class="monitor-table w-full text-left text-sm text-gray-300">
-                            <thead id="detail-head" class="bg-zinc-900 uppercase text-xs font-bold text-gray-400 border-b border-zinc-700"></thead>
-                            <tbody id="detail-body" class="divide-y divide-zinc-700">
-                                <tr><td class="p-6 text-center animate-pulse">Memuat data plan...</td></tr>
-                            </tbody>
-                        </table>
+                         <div class="overflow-auto custom-scrollbar flex-grow">
+                            <table class="monitor-table w-full text-left text-sm text-gray-300">
+                                <thead id="detail-head" class="bg-zinc-900 uppercase text-xs font-bold text-gray-400 border-b border-zinc-700"></thead>
+                                <tbody id="detail-body" class="divide-y divide-zinc-700">
+                                    <tr><td class="p-6 text-center animate-pulse">Memuat data plan...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
             `;
@@ -692,7 +713,7 @@
                 const displayHeaders = headers.slice(0, 15);
                 thead.innerHTML = '<tr>' + displayHeaders.map(h => `<th class="px-4 py-3 whitespace-nowrap">${h}</th>`).join('') + '</tr>';
 
-                // Filter data berdasarkan Mesin
+                // 1. FILTER DATA BERDASARKAN MESIN (TIDAK DIURUTKAN UNTUK TABEL)
                 const filteredData = data.filter(row => {
                     const mesinVal = row[machineKey] || '';
                     return String(mesinVal).trim() === selectedMachine;
@@ -704,8 +725,10 @@
                     return;
                 }
 
-                // Urutkan data berdasarkan waktu START
-                filteredData.sort((a, b) => {
+                // 2. SIAPKAN DATA UNTUK CHART (DIURUTKAN)
+                // Kita butuh data terurut untuk menghitung gap timeline dengan benar
+                const chartData = [...filteredData]; // Copy array
+                chartData.sort((a, b) => {
                     const tA = timeToMinutes(a[startKey]);
                     const tB = timeToMinutes(b[startKey]);
                     return (tA || 0) - (tB || 0);
@@ -720,8 +743,8 @@
                 let downtimeSegments = [];
                 let currentTime = timelineStart;
 
-                // 1. Kumpulkan semua segmen proses yang valid dan urutkan
-                const validProcesses = filteredData.map(row => {
+                // A. Kumpulkan semua segmen proses yang valid dari data terurut
+                const validProcesses = chartData.map(row => {
                     let start = timeToMinutes(row[startKey]);
                     let end = timeToMinutes(row[finishKey]);
 
@@ -742,13 +765,12 @@
                 // Urutkan ulang berdasarkan waktu mulai yang sudah di-clamp
                 validProcesses.sort((a, b) => a.start - b.start);
                 
-                // 2. Gabungkan proses yang tumpang tindih (optional, tapi lebih akurat)
+                // B. Gabungkan proses yang tumpang tindih (optional)
                 let mergedProcesses = [];
                 if (validProcesses.length > 0) {
                     let current = validProcesses[0];
                     for (let i = 1; i < validProcesses.length; i++) {
                         const next = validProcesses[i];
-                        // Jika ada tumpang tindih atau bersentuhan, gabungkan
                         if (next.start <= current.end) {
                             current.end = Math.max(current.end, next.end);
                         } else {
@@ -759,12 +781,21 @@
                     mergedProcesses.push(current);
                 }
 
-                // 3. Hitung segmen Downtime/Gap (Merah) dan segmen Proses (Hijau)
+                // C. Hitung segmen Downtime/Gap (Merah) dan segmen Proses (Hijau)
                 currentTime = timelineStart;
 
                 mergedProcesses.forEach((process, index) => {
-                    // Cek Downtime sebelum proses ini dimulai (GAP antara currentTime dan process.start)
-                    // MODIFIKASI: index > 0 memastikan hanya gap DI ANTARA proses (bukan di awal)
+                    // LOGIKA BARU: Cek Gap Awal (Sebelum proses pertama jika > 08:00)
+                    if (index === 0 && process.start > timelineStart) {
+                         downtimeSegments.push({
+                            x: [timelineStart, process.start],
+                            y: selectedMachine,
+                            details: { label: 'Downtime Awal' }
+                        });
+                    }
+
+                    // Cek Downtime Antar Proses (Gap antara currentTime dan process.start)
+                    // (index > 0 memastikan ini bukan gap awal yang sudah dihandle diatas)
                     if (index > 0 && process.start > currentTime) {
                         downtimeSegments.push({ 
                             x: [currentTime, process.start], 
@@ -784,9 +815,9 @@
                     currentTime = process.end;
                 });
                 
-                // MODIFIKASI: Bagian penambahan gap akhir (tail) DIHAPUS agar tidak menutup sampai 20:00
+                // Tidak ada kode untuk gap akhir (tail), sesuai permintaan.
 
-                debugText.textContent = `Visualisasi: ${validProcessCount} proses, ${downtimeSegments.length} gap (inter-process).`;
+                debugText.textContent = `Visualisasi: ${validProcessCount} proses, ${downtimeSegments.length} gap.`;
 
                 const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
                 chartInstances['timelineChart'] = new Chart(ctxTimeline, {
@@ -798,10 +829,10 @@
                             {
                                 label: 'Waktu Luang/Downtime',
                                 data: downtimeSegments,
-                                backgroundColor: '#ef4444', // Merah
+                                backgroundColor: '#ef4444', 
                                 borderColor: '#ef4444',
                                 borderWidth: 0,
-                                stack: 'timelineStack', // KUNCI: Satukan di stack yang sama
+                                stack: 'timelineStack', 
                                 barPercentage: 0.8,
                                 categoryPercentage: 1.0
                             },
@@ -809,17 +840,17 @@
                             {
                                 label: 'Proses Berjalan',
                                 data: processSegments,
-                                backgroundColor: '#22c55e', // Hijau
+                                backgroundColor: '#22c55e', 
                                 borderColor: '#22c55e',
                                 borderWidth: 0,
-                                stack: 'timelineStack', // KUNCI: Satukan di stack yang sama
+                                stack: 'timelineStack', 
                                 barPercentage: 0.8,
                                 categoryPercentage: 1.0
                             }
                         ]
                     },
                     options: {
-                        indexAxis: 'y', // Horizontal
+                        indexAxis: 'y', 
                         responsive: true,
                         maintainAspectRatio: false,
                         interaction: {
@@ -831,7 +862,7 @@
                             x: {
                                 min: timelineStart,
                                 max: timelineEnd,
-                                stacked: false, // KUNCI: False agar waktu tidak dijumlahkan, tapi diletakkan sesuai koordinat
+                                stacked: false,
                                 grid: { 
                                     color: '#3f3f46', 
                                     drawOnChartArea: true,
@@ -843,7 +874,7 @@
                                 }
                             },
                             y: {
-                                stacked: true, // KUNCI: True agar barisnya menyatu
+                                stacked: true,
                                 grid: { display: false },
                                 ticks: { display: true, color: 'white', font: {weight: 'bold'} } 
                             }
@@ -869,23 +900,39 @@
                     }
                 });
 
-                // --- RENDER TABEL ---
+                // --- RENDER TABEL (MENGGUNAKAN filteredData YANG BELUM DIURUTKAN) ---
                 tbody.innerHTML = filteredData.map(row => {
-                    let rowClass = 'bg-zinc-800 text-gray-300 hover:bg-zinc-700 transition';
-                    // Logika warna baris sederhana
-                    const valL = row[displayHeaders[11]] ? String(row[displayHeaders[11]]).trim() : '';
-                    if (valL) rowClass = 'bg-gray-700 text-white';
+                    let rowClass = 'bg-zinc-800 text-gray-300'; // Default styling
+
+                    // Identifikasi Kolom L (Index 11) dan M (Index 12)
+                    // Asumsi urutan kolom dari sheet sesuai array headers
+                    const colL = displayHeaders[11];
+                    const colM = displayHeaders[12];
+                    
+                    const valL = row[colL] ? String(row[colL]).trim() : '';
+                    const valM = row[colM] ? String(row[colM]).trim() : '';
+
+                    // LOGIKA WARNA LATAR
+                    if (valL === '' && valM === '') {
+                        // Putih (text hitam agar terbaca)
+                        rowClass = 'bg-white text-black font-semibold';
+                    } else if (valL !== '' && valM === '') {
+                        // Hijau
+                        rowClass = 'bg-green-600 text-white';
+                    } else if (valL !== '' && valM !== '') {
+                        // Abu-abu
+                        rowClass = 'bg-gray-600 text-white';
+                    }
 
                     const cellsHtml = displayHeaders.map(h => {
                         let cellVal = row[h] !== undefined ? row[h] : '';
-                        // Format kolom waktu di tabel agar rapi
                         if (h === startKey || h === finishKey) {
                            const m = timeToMinutes(cellVal);
                            if (m !== null) cellVal = minutesToTimeWithSeconds(m);
                         }
-                        return `<td class="px-4 py-3 whitespace-nowrap">${cellVal}</td>`;
+                        return `<td class="px-4 py-3 whitespace-nowrap border-b border-zinc-700/20">${cellVal}</td>`;
                     }).join('');
-                    return `<tr class="${rowClass} border-b border-zinc-700">${cellsHtml}</tr>`;
+                    return `<tr class="${rowClass} hover:opacity-90 transition">${cellsHtml}</tr>`;
                 }).join('');
 
             } catch (err) {
