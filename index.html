@@ -1084,22 +1084,25 @@
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-4xl mx-auto">
-                    ${createHeader('Informasi', 'Panduan Operator')}
+                    ${createHeader('Informasi', 'Panduan Operasional')}
                     <div class="bg-zinc-800 p-8 rounded-xl shadow-lg text-gray-300 space-y-4 border-l-4 border-cyan-500">
-                        <h3 class="text-xl font-bold text-white">Cara Membaca Dashboard</h3>
+                        <h3 class="text-xl font-bold text-white">Cara Membaca Dashboard Monitor</h3>
                         <ul class="list-disc pl-5 space-y-2">
-                            <li><strong>Grafik Donut:</strong> Menunjukkan persentase penyelesaian target hari ini.</li>
-                            <li><strong>Warna Kuning:</strong> Proses berjalan normal (Standard).</li>
-                            <li><strong>Warna Hijau:</strong> Pencapaian target > 90% (Excellent).</li>
-                            <li><strong>Warna Merah:</strong> Pencapaian < 30% atau ada downtime.</li>
+                            <li><strong>Total Qty Selesai:</strong> Menunjukkan Total Qty Selesai hari ini All Line.</li>
+                            <li><strong>Total Plan Qty:</strong> Menunjukkan Total Plan Qty hari ini All Line.</li>
+                            <li><strong>Pencapaian Total:</strong> Menunjukkan Pencapaian Total hari ini All Line.</li>
+                            <li><strong>Grafik Donut:</strong> Menunjukkan persentase penyelesaian target perLine.</li>
+                            <li><strong>Kartu Line:</strong> kartu Line dapat di klik untuk melihat detail perLine.</li>
+                            <li><strong>Timeline Produksi:</strong> Warna Hijau = waktu mesin Running, Merah = Mesin Berhenti.</li>
+                            <li><strong>Log Plan Proses:</strong> Warna abu-abu = Selesai Proses, Hijau = Sedang Proses, Putih =  Wait Proses.</li>
                         </ul>
                         <div class="border-t border-gray-700 my-4"></div>
                         <h3 class="text-xl font-bold text-white">Prosedur Update Data</h3>
-                        <p>Operator atau Admin wajib melakukan update data melalui menu "Kontrol Mesin" setiap:</p>
+                        <p> Update data di bagi ke dilakukan oleh 2 Section</p>
                         <ol class="list-decimal pl-5 space-y-1">
-                            <li>Pergantian Shift.</li>
-                            <li>Mesin Breakdown/Stop lebih dari 15 menit.</li>
-                            <li>Pencapaian output per jam.</li>
+                            <li>PIC Planing update plan proses.</li>
+                            <li>Member Produksi dengan Scan WOS lewat aplikasi.</li>
+                            <li>Revisi Data jika ada kesalahan hubungi Administrator.</li>
                         </ol>
                     </div>
                 </div>
@@ -1116,12 +1119,13 @@
                         <div class="h-20 w-20 bg-green-900 rounded-full mx-auto flex items-center justify-center mb-4">
                              <span class="text-4xl">📊</span>
                         </div>
-                        <h2 class="text-2xl font-bold text-white mb-2">Monitoring Production System</h2>
-                        <p class="text-gray-400 mb-6">Dikembangkan untuk memantau efisiensi (OEE) dan output line produksi secara real-time.</p>
+                        <h2 class="text-2xl font-bold text-white mb-2">HANWA Monitoring Production System</h2>
+                        <p class="text-gray-400 mb-6">Dikembangkan untuk memantau efisiensi proses dan output line produksi secara real-time.</p>
                         <div class="grid grid-cols-2 gap-4 text-left max-w-md mx-auto text-sm bg-zinc-900 p-4 rounded-lg border border-zinc-700">
                             <div class="text-gray-500">Versi</div><div class="text-white">1.2.0 (RBAC Enabled)</div>
                             <div class="text-gray-500">Database</div><div class="text-white">Google Sheets</div>
                             <div class="text-gray-500">Status</div><div class="text-green-400">Online</div>
+                            <div class="text-gray-500">Elaborated</div><div class="text-white">Sopari-HSSI0293</div>
                         </div>
                     </div>
                 </div>
