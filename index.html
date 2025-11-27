@@ -7,8 +7,9 @@
     <!-- Memuat Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Memuat Chart.js untuk Dashboard Analitik -->
-    <!-- Mengganti ke versi yang mendukung floating bar lebih baik (Chart.js 4.x atau 3.x) -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.2/dist/chart.umd.min.js"></script>
+    <!-- Memuat Date Adapter untuk Chart.js (Opsional tapi membantu jika menggunakan skala waktu) -->
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
     <style>
         /* Mengatur font default dan dark mode (Tema Zinc/Hitam/Putih) */
         body {
@@ -36,7 +37,7 @@
             border-top: 4px solid #22c55e;
         }
         
-        /* Style Main Menu Card (Desain Baru) */
+        /* Style Main Menu Card */
         .menu-card {
             background-color: #27272a; /* Zinc 800 */
             transition: all 0.3s ease-in-out;
@@ -47,10 +48,10 @@
             justify-content: center;
             align-items: center;
             text-align: center;
-            border-radius: 0.75rem; /* rounded-xl */
+            border-radius: 0.75rem; 
             padding: 2rem;
             box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-            border-left-width: 4px; /* Border warna di kiri seperti referensi */
+            border-left-width: 4px;
         }
         .menu-card:hover {
             background-color: #3f3f46; /* Zinc 700 */
@@ -86,7 +87,7 @@
             box-shadow: 0 4px 15px rgba(34, 197, 94, 0.4);
         }
 
-        /* Dashboard Card Specifics (Gauges) */
+        /* Dashboard Card Specifics */
         .process-card {
             background-color: #27272a;
             border-radius: 0.75rem;
@@ -188,45 +189,44 @@
             return parseFloat(num).toLocaleString('en-US');
         }
 
-        // Helper Time Converter (String "HH:mm:ss" -> Minutes from 00:00)
-        function timeToMinutes(timeStr) {
-            if (!timeStr) return 0;
-            const parts = timeStr.toString().split(':');
-            if (parts.length < 2) return 0;
+        // PERBAIKAN: Fungsi konversi waktu yang lebih tangguh
+        // Menerima string "HH:mm" atau angka desimal (0.5 = jam 12 siang)
+        function timeToMinutes(input) {
+            if (input === null || input === undefined || input === '') return null;
+
+            // Jika input adalah angka (dari Google Sheet seringkali 0.xxxxx)
+            if (typeof input === 'number') {
+                // Konversi hari ke menit (1 hari = 1440 menit)
+                return Math.round(input * 1440);
+            }
+
+            const str = String(input).trim();
+            // Ganti titik dengan titik dua jika user input manual "08.00"
+            const normalized = str.replace('.', ':');
+            const parts = normalized.split(':');
+            
+            if (parts.length < 2) return null;
             
             let totalMinutes = parseInt(parts[0]) * 60 + parseInt(parts[1]);
-            // Menambahkan detik jika ada, dibagi 60
             if (parts.length > 2) totalMinutes += parseInt(parts[2]) / 60; 
 
-            // Logika untuk waktu hari berikutnya (misalnya, shift malam 22:00 - 06:00)
-            // Jika jam < 8 pagi, anggap itu adalah jam 24 jam + jam sebenarnya
-            // Ini untuk memastikan 01:00 dihitung setelah 23:00.
-            if (parseInt(parts[0]) < 8) { 
-                totalMinutes += (24 * 60);
-            }
             return totalMinutes;
         }
 
-        // Helper Minutes -> String "HH:mm"
         function minutesToTime(minutes) {
-            // Gunakan totalMinutes untuk menghitung jam dan menit
+            if (minutes === null || isNaN(minutes)) return '';
             let totalMinutes = Math.round(minutes);
             let h = Math.floor(totalMinutes / 60);
             let m = Math.floor(totalMinutes % 60);
-            
-            // Jika h > 24, kita perlu mengabaikan logika 24 jam karena ini adalah label waktu.
-            // Biarkan jam lebih dari 24:00 (misalnya 25:00)
-            
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
         }
         
-        // Helper Minutes -> String "HH:mm:ss"
         function minutesToTimeWithSeconds(minutes) {
+             if (minutes === null || isNaN(minutes)) return '';
             let totalSeconds = Math.round(minutes * 60);
             let h = Math.floor(totalSeconds / 3600);
             let m = Math.floor((totalSeconds % 3600) / 60);
             let s = totalSeconds % 60;
-            
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         }
 
@@ -237,26 +237,20 @@
                 const response = await fetch(url);
                 if (!response.ok) throw new Error(`HTTP Error: ${response.status}`);
                 const text = await response.text();
-                // Strip the surrounding data (// & google.visualization.Query.setResponse(...))
                 const jsonText = text.substring(text.indexOf('{'), text.lastIndexOf('}') + 1);
                 if (!jsonText) throw new Error("Format data Sheet tidak valid.");
                 const json = JSON.parse(jsonText);
                 if (json.status !== 'ok') {
-                    const errorMsg = json.errors ? json.errors[0].message : 'Query error';
-                    throw new Error(`Gviz Error: ${errorMsg}`);
+                    throw new Error(`Gviz Error: ${json.errors ? json.errors[0].message : 'Query error'}`);
                 }
                 return parseGVizData(json);
             } catch (error) {
                 console.error(`Gagal mengambil data sheet ${sheetName}:`, error);
-                if (error.message.includes('Failed to fetch')) {
-                    throw new Error("Gagal Terhubung! Pastikan Google Sheet sudah di-SHARE ke 'Anyone with the link' (Public).");
-                }
                 throw error;
             }
         }
 
         function parseGVizData(json) {
-            // Mengambil 15 kolom pertama (A sampai O)
             const maxCols = 15; 
             const cols = json.table.cols.slice(0, maxCols).map(col => (col.label || col.id).toUpperCase().trim());
             const rows = json.table.rows;
@@ -264,8 +258,12 @@
                 let obj = {};
                 cols.forEach((col, index) => {
                     const cell = row.c[index];
-                    // Menggunakan cell.v untuk nilai mentah
-                    obj[col] = cell ? (cell.v !== null ? cell.v : '') : ''; 
+                    // PERBAIKAN UTAMA: Ambil nilai terformat (f) jika ada, agar jam terbaca sebagai "08:00" bukan angka
+                    // Jika tidak ada f, ambil v.
+                    let val = cell ? (cell.f || cell.v) : ''; 
+                    // Pastikan tidak null
+                    if (val === null) val = '';
+                    obj[col] = val; 
                 });
                 return obj;
             });
@@ -276,7 +274,6 @@
 
         function navigate(page) {
             localStorage.setItem('currentMonitorPage', page);
-            // Hancurkan semua instance Chart.js sebelum rendering ulang
             Object.values(chartInstances).forEach(chart => chart.destroy());
             chartInstances = {};
             const container = document.getElementById('app-container');
@@ -640,7 +637,7 @@
             });
         }
 
-        // --- HALAMAN DETAIL MESIN (MODIFIKASI TIMELINE GRAFIK & TABEL) ---
+        // --- HALAMAN DETAIL MESIN (MODIFIKASI: FOKUS HIJAU DULU) ---
         async function renderDetailMesin() {
             const container = document.getElementById('app-container');
             if (!selectedMachine) {
@@ -651,19 +648,17 @@
                 <div class="app-view p-6 max-w-7xl mx-auto">
                     ${createHeader(`Timeline: ${selectedMachine}`, 'Visualisasi Jalannya Proses Produksi', true, 'monitorDashboard')}
                     
-                    <!-- CONTAINER CHART TIMELINE (BARU - MODIFIKASI GAYA) -->
                     <div class="mb-8 bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-lg">
                         <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
-                            <h3 class="text-white font-bold text-lg">Timeline Produksi Hari Ini</h3>
+                            <h3 class="text-white font-bold text-lg">Timeline Produksi Hari Ini (08:00 - 20:00)</h3>
                             <div class="flex gap-4 text-xs text-gray-400">
                                 <div class="timeline-legend-item"><span class="timeline-legend-color bg-green-500"></span>Proses Berjalan</div>
-                                <div class="timeline-legend-item"><span class="timeline-legend-color bg-red-500"></span>Waktu Idle / Tunggu</div>
                             </div>
                         </div>
                         <div class="relative h-40 w-full">
                             <canvas id="timelineChart"></canvas>
                         </div>
-                        <div id="timeline-loading" class="text-center text-sm text-gray-500 mt-2">Memproses data grafik...</div>
+                        <div id="timeline-debug" class="text-center text-xs text-gray-500 mt-2 font-mono"></div>
                     </div>
 
                     <div class="overflow-x-auto shadow-lg rounded-xl border-l-4 border-yellow-500 bg-zinc-800">
@@ -686,209 +681,121 @@
                 const headers = result.headers;
                 const tbody = document.getElementById('detail-body');
                 const thead = document.getElementById('detail-head');
-                const loadingText = document.getElementById('timeline-loading');
+                const debugText = document.getElementById('timeline-debug');
                 
-                // Batasi header hanya sampai kolom O (15 kolom)
+                // --- DETEKSI KOLOM OTOMATIS ---
+                // Mencari nama kolom yang benar untuk START, FINISH, dan MESIN
+                // Ini mencegah error jika nama kolom di sheet sedikit berbeda (misal "Start Time" vs "START")
+                const allKeys = data.length > 0 ? Object.keys(data[0]) : headers;
+                const startKey = allKeys.find(k => k.includes('START') || k.includes('MULAI')) || 'START';
+                const finishKey = allKeys.find(k => k.includes('FINISH') || k.includes('SELESAI')) || 'FINISH';
+                const machineKey = allKeys.find(k => k.includes('MESIN') || k.includes('NAME') || k.includes('LINE')) || 'MESIN';
+                
+                // Tampilkan Header Tabel
                 const displayHeaders = headers.slice(0, 15);
                 thead.innerHTML = '<tr>' + displayHeaders.map(h => `<th class="px-4 py-3 whitespace-nowrap">${h}</th>`).join('') + '</tr>';
 
-                // Filter data berdasarkan Mesin yang dipilih
+                // Filter data berdasarkan Mesin
                 const filteredData = data.filter(row => {
-                    const mesinVal = row['MESIN'] || row['NAME'] || '';
+                    const mesinVal = row[machineKey] || '';
                     return String(mesinVal).trim() === selectedMachine;
                 });
 
                 if (filteredData.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="${displayHeaders.length}" class="p-6 text-center text-gray-500">Tidak ada data plan untuk mesin ${selectedMachine}.</td></tr>`;
-                    loadingText.textContent = "Tidak ada data untuk ditampilkan di grafik.";
+                    debugText.textContent = "Data kosong untuk mesin ini.";
                     return;
                 }
 
                 // Urutkan data berdasarkan waktu START
                 filteredData.sort((a, b) => {
-                    const tA = timeToMinutes(a['START'] || a['MULAI']);
-                    const tB = timeToMinutes(b['START'] || b['MULAI']);
-                    return tA - tB;
+                    const tA = timeToMinutes(a[startKey]);
+                    const tB = timeToMinutes(b[startKey]);
+                    return (tA || 0) - (tB || 0);
                 });
 
-                // --- LOGIKA CHART TIMELINE (PROSES BERJALAN & IDLE) ---
+                // --- LOGIKA CHART FOKUS HIJAU (PROSES SAJA) ---
+                const timelineStart = 8 * 60;  // 08:00
+                const timelineEnd = 20 * 60;   // 20:00
                 
-                // Waktu mulai default 08:00 (480 menit)
-                const defaultStartMin = 8 * 60; 
-                let minTime = defaultStartMin; 
-                let maxTime = defaultStartMin;
-                let lastFinishMin = defaultStartMin;
+                const processSegments = [];
+                let validCount = 0;
 
-                // Memisahkan datasets untuk Chart.js
-                // Kita akan menyimpan data dalam format { x: [start, end], y: 'SL1' }
-                const processData = []; // Untuk segmen Hijau
-                const idleData = [];    // Untuk segmen Merah
-                const labels = [selectedMachine]; 
-                
-                
-                // 1. Tentukan Titik Awal (Default 08:00)
-                const firstStartRaw = filteredData[0]['START'] || filteredData[0]['MULAI'];
-                const firstStartMin = firstStartRaw ? timeToMinutes(firstStartRaw) : defaultStartMin;
-                
-                // Jika waktu mulai pertama lebih dari 08:00, ada IDLE awal
-                if (firstStartMin > defaultStartMin) {
-                    idleData.push([defaultStartMin, firstStartMin]);
-                }
-                
-                // Set finish terakhir ke start pertama
-                lastFinishMin = firstStartMin;
+                filteredData.forEach(row => {
+                    let start = timeToMinutes(row[startKey]);
+                    let end = timeToMinutes(row[finishKey]);
 
-
-                filteredData.forEach((row, index) => {
-                    const startRaw = row['START'] || row['MULAI'];
-                    const finishRaw = row['FINISH'] || row['SELESAI'];
+                    // Skip jika data waktu tidak valid
+                    if (start === null || end === null) return;
                     
-                    if(startRaw && finishRaw) {
-                        const startMin = timeToMinutes(startRaw);
-                        const finishMin = timeToMinutes(finishRaw);
+                    // Normalisasi agar fit di chart 08:00 - 20:00 (Opsional: bisa dihilangkan jika ingin lihat semua)
+                    // Tapi user minta rentang ini.
+                    if (end <= start) return; 
 
-                        // 1. Tentukan batas waktu minimum/maksimum
-                        if (startMin < minTime) minTime = startMin;
-                        if (finishMin > maxTime) maxTime = finishMin;
-
-                        // 2. Tambahkan Segmen IDLE (Merah)
-                        // Dari finish sebelumnya ke start saat ini (jika ada jeda)
-                        if (startMin > lastFinishMin) {
-                            idleData.push([lastFinishMin, startMin]);
-                        }
-                        
-                        // 3. Tambahkan Segmen PROSES (Hijau)
-                        // Hanya jika ada durasi positif
-                        if (finishMin > startMin) {
-                            processData.push([startMin, finishMin]);
-                        }
-
-                        // 4. Update finish terakhir (titik awal untuk idle berikutnya)
-                        lastFinishMin = finishMin;
-                    }
+                    // Tambahkan ke grafik
+                    processSegments.push({
+                        x: [start, end],
+                        y: selectedMachine,
+                        details: row 
+                    });
+                    validCount++;
                 });
-                
-                // --- PENENTUAN SKALA WAKTU X AKHIR ---
-                
-                // Pastikan maxTime minimal 1 jam setelah proses terakhir, atau 17:00 (17*60 = 1020)
-                const defaultEndMin = 17 * 60;
-                
-                // Tambahkan segmen idle akhir (dari finish terakhir hingga defaultEndMin atau waktu saat ini)
-                const currentTime = new Date();
-                const currentMinutes = timeToMinutes(`${currentTime.getHours()}:${currentTime.getMinutes()}:${currentTime.getSeconds()}`);
-                
-                // Tentukan waktu akhir yang akan ditampilkan: max(defaultEndMin, currentMinutes, lastFinishMin)
-                let finalMaxTime = Math.max(defaultEndMin, currentMinutes);
-                
-                // Jika finish terakhir kurang dari waktu maksimum tampilan, isi dengan idle
-                if (lastFinishMin < finalMaxTime) {
-                    idleData.push([lastFinishMin, finalMaxTime]);
-                    maxTime = finalMaxTime;
-                } else if (lastFinishMin > finalMaxTime) {
-                     // Jika proses melewati waktu tampilan default, bulatkan ke jam berikutnya
-                    maxTime = (Math.ceil(lastFinishMin / 60) * 60);
-                } else {
-                    maxTime = finalMaxTime;
-                }
-                
-                // Pastikan minTime adalah 08:00
-                minTime = defaultStartMin;
-                
-                
-                // Catatan penting: Chart.js untuk floating bar (timeline) menggunakan tipe 'bar' horizontal.
-                // Karena data sudah disiapkan sebagai [start, end], kita perlu mengatur agar
-                // kedua dataset (Proses dan Idle) saling mengisi rentang waktu yang sama 
-                // pada sumbu Y (kategori mesin)
-                
-                // Data Timeline harus berupa:
-                // datasets: [
-                //   { data: [ [start1, end1], [start2, end2]... ] } // Hanya satu bar per kategori
-                // ]
-                // JIKA MENGGUNAKAN DUA DATASET, KITA HARUS MENGGUNAKAN DATAPOINT DENGAN Y-VALUE
-                // UNTUK MEMASTIKAN MEREKA TAMPIL DI BARIS YANG SAMA.
-                
-                // Solusi: Kita akan menggunakan hanya satu kategori ('Mesin') dan 
-                // menggabungkan data dari kedua array (Proses & Idle)
-                
-                // Gabungkan semua data segmen menjadi satu dataset tunggal
-                const allSegments = [
-                    ...processData.map(d => ({ x: d, y: selectedMachine, color: '#22c55e', label: 'Proses Berjalan' })),
-                    ...idleData.map(d => ({ x: d, y: selectedMachine, color: '#ef4444', label: 'Waktu Idle / Tunggu' }))
-                ];
-                
-                // Urutkan berdasarkan waktu mulai (x[0])
-                allSegments.sort((a, b) => a.x[0] - b.x[0]);
-                
-                const finalDataset = [{
-                    label: 'Produksi Timeline',
-                    data: allSegments.map(s => s.x),
-                    backgroundColor: allSegments.map(s => s.color),
-                    borderColor: '#18181b', // Warna border sama dengan background body
-                    borderWidth: 1,
-                    barPercentage: 1.0,
-                    categoryPercentage: 0.8,
-                    parsing: false,
-                    // Kita perlu menyediakan y-value yang sama untuk semua segmen
-                    y: selectedMachine,
-                    originalSegments: allSegments // Simpan untuk tooltip
-                }];
-                
+
+                debugText.textContent = `Ditemukan ${filteredData.length} baris data. ${validCount} valid untuk ditampilkan di grafik.`;
 
                 const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
                 chartInstances['timelineChart'] = new Chart(ctxTimeline, {
                     type: 'bar',
                     data: {
-                        labels: [selectedMachine], // Kategori tunggal
-                        datasets: finalDataset 
+                        labels: [selectedMachine], 
+                        datasets: [
+                            {
+                                label: 'Proses Berjalan',
+                                data: processSegments,
+                                backgroundColor: '#22c55e', // Hijau
+                                borderColor: '#22c55e',
+                                borderWidth: 1,
+                                barPercentage: 0.6, 
+                                categoryPercentage: 0.8,
+                                borderSkipped: false,
+                                borderRadius: 4
+                            }
+                        ]
                     },
                     options: {
-                        indexAxis: 'y', // Bar Horizontal
+                        indexAxis: 'y', // Horizontal
                         responsive: true,
                         maintainAspectRatio: false,
-                        // Kita tidak menggunakan stacking karena semua segmen berada di satu baris Y
                         scales: {
                             x: {
-                                stacked: true, // Kembali ke stacked, ini biasanya diperlukan untuk floating bar
-                                min: minTime,
-                                max: maxTime,
+                                min: timelineStart,
+                                max: timelineEnd,
                                 grid: { 
                                     color: '#3f3f46', 
                                     drawOnChartArea: true,
-                                    drawTicks: false
                                 },
                                 ticks: {
                                     color: '#9ca3af',
-                                    // Callback untuk menampilkan waktu (HH:mm)
-                                    callback: function(value) { return minutesToTime(value); },
-                                    maxRotation: 0,
-                                    minRotation: 0
+                                    stepSize: 60, // Per jam
+                                    callback: function(value) { return minutesToTime(value); }
                                 }
                             },
                             y: {
-                                stacked: true, // Penting untuk floating bar di Chart.js 4+
                                 grid: { display: false },
-                                ticks: { color: '#9ca3af' } 
+                                ticks: { display: true, color: 'white', font: {weight: 'bold'} } 
                             }
                         },
                         plugins: {
                             tooltip: {
-                                mode: 'nearest',
-                                intersect: true,
                                 callbacks: {
-                                    title: (tooltipItems) => {
-                                        // Cari segmen asli berdasarkan indeks
-                                        const index = tooltipItems[0].dataIndex;
-                                        const segment = finalDataset[0].originalSegments[index];
-                                        return segment ? segment.label : 'Segmen Waktu';
-                                    },
                                     label: function(context) {
-                                        if (Array.isArray(context.raw)) {
-                                            const start = minutesToTime(context.raw[0]);
-                                            const end = minutesToTime(context.raw[1]);
-                                            const dur = Math.round(context.raw[1] - context.raw[0]);
-                                            return `Waktu: ${start} - ${end} (${dur} Menit)`;
+                                        const raw = context.raw;
+                                        if (raw.x && Array.isArray(raw.x)) {
+                                            const s = minutesToTime(raw.x[0]);
+                                            const e = minutesToTime(raw.x[1]);
+                                            return `Proses: ${s} - ${e}`;
                                         }
-                                        return context.formattedValue;
+                                        return '';
                                     }
                                 }
                             },
@@ -896,62 +803,33 @@
                         }
                     }
                 });
-                loadingText.classList.add('hidden');
 
-                // --- RENDER TABEL LOG PLAN PROSES (MODIFIKASI WARNA & FORMAT WAKTU) ---
+                // --- RENDER TABEL ---
                 tbody.innerHTML = filteredData.map(row => {
-                    // Mencari key untuk kolom yang relevan
-                    const startKey = displayHeaders.find(h => h.includes('START') || h.includes('MULAI')) || 'START';
-                    const finishKey = displayHeaders.find(h => h.includes('FINISH') || h.includes('SELESAI')) || 'FINISH';
-                    
-                    // Ambil nilai dan pastikan diubah ke string upper case untuk perbandingan
-                    const valL = displayHeaders[11] && row[displayHeaders[11]] !== undefined ? String(row[displayHeaders[11]]).trim().toUpperCase() : '';
-                    const valM = displayHeaders[12] && row[displayHeaders[12]] !== undefined ? String(row[displayHeaders[12]]).trim().toUpperCase() : '';
-
-                    let rowClass = 'bg-zinc-800 hover:bg-zinc-700 transition'; 
-                    
-                    // Logika Warna berdasarkan permintaan
-                    
-                    // Kondisi 1: Kolom L ADA data DAN Kolom M ADA data -> Abu-abu Gelap (Selesai Total)
-                    if (valL !== '' && valM !== '') {
-                        rowClass = 'bg-gray-600 text-white text-xs border-b border-gray-700 font-medium hover:bg-gray-500';
-                    } 
-                    // Kondisi 2: Kolom L ADA data TETAPI Kolom M KOSONG -> Hijau Cerah (Sedang Berjalan)
-                    else if (valL !== '' && valM === '') {
-                        rowClass = 'bg-green-700 text-white text-xs border-b border-green-800 font-medium hover:bg-green-600';
-                    } else {
-                        // Default atau Belum Mulai
-                        rowClass = 'bg-zinc-800 text-gray-300 text-xs border-b border-zinc-700 hover:bg-zinc-700';
-                    }
+                    let rowClass = 'bg-zinc-800 text-gray-300 hover:bg-zinc-700 transition';
+                    // Logika warna baris sederhana
+                    const valL = row[displayHeaders[11]] ? String(row[displayHeaders[11]]).trim() : '';
+                    if (valL) rowClass = 'bg-gray-700 text-white';
 
                     const cellsHtml = displayHeaders.map(h => {
                         let cellVal = row[h] !== undefined ? row[h] : '';
-                        
-                        // Modifikasi: Format START dan FINISH ke HH:mm:ss
+                        // Format kolom waktu di tabel agar rapi
                         if (h === startKey || h === finishKey) {
-                            // Coba konversi dari menit jika nilai aslinya adalah angka,
-                            if (typeof cellVal === 'number') {
-                                cellVal = minutesToTimeWithSeconds(cellVal);
-                            } else if (typeof cellVal === 'string' && cellVal.match(/^\d{1,2}:\d{2}(:\d{2})?$/)) {
-                                // Tambahkan :00 jika hanya HH:mm
-                                if (cellVal.split(':').length === 2) {
-                                    cellVal += ':00';
-                                }
-                            }
+                           // Coba parsing dulu, kalau berhasil format ulang
+                           const m = timeToMinutes(cellVal);
+                           if (m !== null) cellVal = minutesToTimeWithSeconds(m);
                         }
-                        
-                        return `<td class="px-2 py-2 whitespace-nowrap">${cellVal}</td>`;
+                        return `<td class="px-4 py-3 whitespace-nowrap">${cellVal}</td>`;
                     }).join('');
-
-                    return `<tr class="${rowClass}">${cellsHtml}</tr>`;
+                    return `<tr class="${rowClass} border-b border-zinc-700">${cellsHtml}</tr>`;
                 }).join('');
 
             } catch (err) {
                 console.error(err);
                 document.getElementById('detail-body').innerHTML = `
                     <tr><td colspan="15" class="p-6 text-center text-red-500">
-                        Gagal memuat data: ${err.message}<br>
-                        <small class="text-gray-500">Pastikan sheet "planproses" memiliki minimal 15 kolom (A-O).</small>
+                        Error: ${err.message}<br>
+                        <small class="text-gray-500">Cek konsol browser untuk detail.</small>
                     </td></tr>`;
             }
         }
