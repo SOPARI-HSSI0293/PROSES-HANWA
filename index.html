@@ -189,7 +189,7 @@
             return parseFloat(num).toLocaleString('en-US');
         }
 
-        // PERBAIKAN: Fungsi konversi waktu yang lebih tangguh
+        // Fungsi konversi waktu yang lebih tangguh
         // Menerima string "HH:mm" atau angka desimal (0.5 = jam 12 siang)
         function timeToMinutes(input) {
             if (input === null || input === undefined || input === '') return null;
@@ -258,10 +258,8 @@
                 let obj = {};
                 cols.forEach((col, index) => {
                     const cell = row.c[index];
-                    // PERBAIKAN UTAMA: Ambil nilai terformat (f) jika ada, agar jam terbaca sebagai "08:00" bukan angka
-                    // Jika tidak ada f, ambil v.
+                    // Ambil nilai terformat (f) jika ada, agar jam terbaca sebagai "08:00" bukan angka
                     let val = cell ? (cell.f || cell.v) : ''; 
-                    // Pastikan tidak null
                     if (val === null) val = '';
                     obj[col] = val; 
                 });
@@ -637,7 +635,7 @@
             });
         }
 
-        // --- HALAMAN DETAIL MESIN (MODIFIKASI: FOKUS MERAH DAN HIJAU) ---
+        // --- HALAMAN DETAIL MESIN (PERBAIKAN: GRAFIK MENYATU & LOGIKA GAP) ---
         async function renderDetailMesin() {
             const container = document.getElementById('app-container');
             if (!selectedMachine) {
@@ -713,7 +711,7 @@
                     return (tA || 0) - (tB || 0);
                 });
 
-                // --- LOGIKA CHART FOKUS MERAH DAN HIJAU ---
+                // --- LOGIKA CHART MENYATU (GANTT CHART STYLE) ---
                 const timelineStart = 8 * 60;  // 08:00 (480 menit)
                 const timelineEnd = 20 * 60;   // 20:00 (1200 menit)
                 
@@ -764,9 +762,10 @@
                 // 3. Hitung segmen Downtime/Gap (Merah) dan segmen Proses (Hijau)
                 currentTime = timelineStart;
 
-                mergedProcesses.forEach(process => {
-                    // Cek Downtime sebelum proses ini dimulai
-                    if (process.start > currentTime) {
+                mergedProcesses.forEach((process, index) => {
+                    // Cek Downtime sebelum proses ini dimulai (GAP antara currentTime dan process.start)
+                    // MODIFIKASI: index > 0 memastikan hanya gap DI ANTARA proses (bukan di awal)
+                    if (index > 0 && process.start > currentTime) {
                         downtimeSegments.push({ 
                             x: [currentTime, process.start], 
                             y: selectedMachine, 
@@ -785,17 +784,9 @@
                     currentTime = process.end;
                 });
                 
-                // 4. Tambahkan sisa Downtime hingga timelineEnd
-                if (currentTime < timelineEnd) {
-                     downtimeSegments.push({ 
-                        x: [currentTime, timelineEnd], 
-                        y: selectedMachine, 
-                        details: { label: 'Downtime' } 
-                    });
-                }
+                // MODIFIKASI: Bagian penambahan gap akhir (tail) DIHAPUS agar tidak menutup sampai 20:00
 
-
-                debugText.textContent = `Ditemukan ${filteredData.length} baris data. ${validProcessCount} segmen proses valid. Dibuat ${mergedProcesses.length} segmen hijau dan ${downtimeSegments.length} segmen merah.`;
+                debugText.textContent = `Visualisasi: ${validProcessCount} proses, ${downtimeSegments.length} gap (inter-process).`;
 
                 const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
                 chartInstances['timelineChart'] = new Chart(ctxTimeline, {
@@ -803,31 +794,27 @@
                     data: {
                         labels: [selectedMachine], 
                         datasets: [
-                            // Dataset 1: Downtime/Gap (Warna Merah) - Harus diletakkan pertama agar berada di belakang
+                            // Dataset 1: Downtime (Merah)
                             {
                                 label: 'Waktu Luang/Downtime',
                                 data: downtimeSegments,
                                 backgroundColor: '#ef4444', // Merah
                                 borderColor: '#ef4444',
-                                borderWidth: 1,
-                                barPercentage: 0.6, 
-                                categoryPercentage: 0.8,
-                                borderSkipped: false,
-                                borderRadius: 4,
-                                order: 2 // Order kedua (di belakang Proses Berjalan)
+                                borderWidth: 0,
+                                stack: 'timelineStack', // KUNCI: Satukan di stack yang sama
+                                barPercentage: 0.8,
+                                categoryPercentage: 1.0
                             },
-                            // Dataset 2: Proses Berjalan (Warna Hijau) - Akan menimpa merah
+                            // Dataset 2: Proses Berjalan (Hijau)
                             {
                                 label: 'Proses Berjalan',
                                 data: processSegments,
                                 backgroundColor: '#22c55e', // Hijau
                                 borderColor: '#22c55e',
-                                borderWidth: 1,
-                                barPercentage: 0.6, 
-                                categoryPercentage: 0.8,
-                                borderSkipped: false,
-                                borderRadius: 4,
-                                order: 1 // Order pertama (di depan Downtime)
+                                borderWidth: 0,
+                                stack: 'timelineStack', // KUNCI: Satukan di stack yang sama
+                                barPercentage: 0.8,
+                                categoryPercentage: 1.0
                             }
                         ]
                     },
@@ -835,11 +822,16 @@
                         indexAxis: 'y', // Horizontal
                         responsive: true,
                         maintainAspectRatio: false,
+                        interaction: {
+                            mode: 'nearest',
+                            axis: 'y',
+                            intersect: false
+                        },
                         scales: {
                             x: {
                                 min: timelineStart,
                                 max: timelineEnd,
-                                stacked: true, // WAJIB STACKED: agar bar merah dan hijau bisa bertumpuk di sumbu X
+                                stacked: false, // KUNCI: False agar waktu tidak dijumlahkan, tapi diletakkan sesuai koordinat
                                 grid: { 
                                     color: '#3f3f46', 
                                     drawOnChartArea: true,
@@ -851,7 +843,7 @@
                                 }
                             },
                             y: {
-                                stacked: true, // WAJIB STACKED: agar bar merah dan hijau bisa bertumpuk di sumbu Y (kategori)
+                                stacked: true, // KUNCI: True agar barisnya menyatu
                                 grid: { display: false },
                                 ticks: { display: true, color: 'white', font: {weight: 'bold'} } 
                             }
@@ -888,7 +880,6 @@
                         let cellVal = row[h] !== undefined ? row[h] : '';
                         // Format kolom waktu di tabel agar rapi
                         if (h === startKey || h === finishKey) {
-                           // Coba parsing dulu, kalau berhasil format ulang
                            const m = timeToMinutes(cellVal);
                            if (m !== null) cellVal = minutesToTimeWithSeconds(m);
                         }
