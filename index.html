@@ -76,9 +76,6 @@
             top: 0;
             z-index: 10;
         }
-        .monitor-table tr:nth-child(even) {
-            background-color: #3f3f46;
-        }
 
         /* Style Tombol */
         .btn-primary {
@@ -143,6 +140,19 @@
             border-color: #22c55e;
             ring: 2px solid #22c55e;
         }
+        
+        /* Custom styles for the Timeline chart legend */
+        .timeline-legend-item {
+            display: flex;
+            align-items: center;
+            margin-right: 1.5rem;
+        }
+        .timeline-legend-color {
+            width: 1rem;
+            height: 0.5rem;
+            margin-right: 0.5rem;
+            border-radius: 2px;
+        }
     </style>
 </head>
 <body>
@@ -152,27 +162,53 @@
 
     <script type="module">
         // --- 1. KONFIGURASI DAN STATE ---
+        // Ganti dengan ID Google Sheet Anda
         const GOOGLE_SHEET_ID = '1QRlL9YUAjWjQwFlXoEX9SK8hA2DeX6i0BPw3WCEid0w'; 
+        // Ganti dengan URL Script Web App Anda
         const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbz8WCZcK1zjIm9GsUiA3Dd3ftL6EA6PsdZIKaLtZp7wzDYBq1Fl9hHeLPQsS0JLYgai/exec';
         
         const SHEETS = {
             DASHBOARD: 'dashboardproses',
             DETAIL: 'detailprogress',
             USER: 'Usercontrol',
-            PLAN: 'planproses' // Ditambahkan Sheet Plan Proses
+            PLAN: 'planproses'
         };
 
         let currentUser = null;
         let dashboardData = [];
         let dashboardHeaders = [];
         let chartInstances = {}; 
-        let selectedMachine = null; // Menyimpan mesin yang dipilih untuk detail
+        let selectedMachine = null;
         
         // --- 2. FUNGSI UTILITAS (FETCH & PARSE) ---
         
         function formatNumber(num) {
             if (num === null || num === undefined || isNaN(num)) return '0';
             return parseFloat(num).toLocaleString('en-US');
+        }
+
+        // Helper Time Converter (String "HH:mm:ss" -> Minutes from 00:00)
+        function timeToMinutes(timeStr) {
+            if (!timeStr) return 0;
+            const parts = timeStr.toString().split(':');
+            if (parts.length < 2) return 0;
+            let totalMinutes = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+            // Menambahkan detik jika ada, dibagi 60
+            if (parts.length > 2) totalMinutes += parseInt(parts[2]) / 60; 
+
+            // Jika waktu sebelum jam 8 pagi, anggap itu hari berikutnya (untuk kasus shift malam)
+            if (parseInt(parts[0]) < 8) { 
+                totalMinutes += (24 * 60);
+            }
+            return totalMinutes;
+        }
+
+        // Helper Minutes -> String "HH:mm"
+        function minutesToTime(minutes) {
+            let totalMinutes = Math.round(minutes);
+            let h = Math.floor(totalMinutes / 60) % 24; // Modulo 24 untuk kembali ke jam 00:00
+            let m = Math.floor(totalMinutes % 60);
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
         }
 
         async function fetchSheetData(sheetName) {
@@ -199,12 +235,15 @@
         }
 
         function parseGVizData(json) {
-            const cols = json.table.cols.map(col => (col.label || col.id).toUpperCase().trim());
+            // Mengambil 15 kolom pertama (A sampai O)
+            const maxCols = 15; 
+            const cols = json.table.cols.slice(0, maxCols).map(col => (col.label || col.id).toUpperCase().trim());
             const rows = json.table.rows;
             const data = rows.map(row => {
                 let obj = {};
                 cols.forEach((col, index) => {
                     const cell = row.c[index];
+                    // Menggunakan cell.v untuk nilai mentah, atau cell.f untuk nilai terformat
                     obj[col] = cell ? (cell.v !== null ? cell.v : '') : ''; 
                 });
                 return obj;
@@ -216,11 +255,8 @@
 
         function navigate(page) {
             localStorage.setItem('currentMonitorPage', page);
-            
-            // Bersihkan chart lama saat pindah halaman
             Object.values(chartInstances).forEach(chart => chart.destroy());
             chartInstances = {};
-
             const container = document.getElementById('app-container');
             container.innerHTML = ''; 
 
@@ -233,7 +269,7 @@
                 case 'login': renderLogin(); break;
                 case 'mainMenu': renderMainMenu(); break;
                 case 'monitorDashboard': renderMonitorDashboard(); break;
-                case 'detailMesin': renderDetailMesin(); break; // Halaman Detail Mesin Baru
+                case 'detailMesin': renderDetailMesin(); break;
                 case 'kontrolMesin': renderKontrolMesin(); break;
                 case 'detailProgress': renderDetailProgress(); break;
                 case 'informasi': renderInformasi(); break;
@@ -245,7 +281,6 @@
         function createHeader(title, subtitle = '', showBackBtn = true, backDestination = 'mainMenu') {
             const username = currentUser ? currentUser.username : 'Guest';
             const role = currentUser ? currentUser.role : '';
-            
             let backButtonHtml = '';
             if (showBackBtn) {
                 backButtonHtml = `
@@ -254,7 +289,6 @@
                     </button>
                 `;
             }
-
             return `
                 <header class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 border-b border-gray-700 pb-4">
                     <div class="flex items-center">
@@ -281,7 +315,6 @@
         }
 
         // --- 4. LOGIC PILIH MESIN ---
-        
         window.openMachineDetail = (namaMesin) => {
             selectedMachine = namaMesin;
             navigate('detailMesin');
@@ -352,7 +385,6 @@
         function renderMainMenu() {
             const container = document.getElementById('app-container');
             const userRole = currentUser ? currentUser.role : 'User';
-            
             const allMenuItems = [
                 {
                     id: 'monitorDashboard',
@@ -375,7 +407,7 @@
                     title: 'DETAIL PROGRESS',
                     desc: 'Tabel Data Produksi Lengkap',
                     color: 'emerald',
-                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>',
+                    icon: '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 10h18M3 14h18m-9-4v8m-7 0h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"></path>',
                     roles: ['Administrator', 'User']
                 },
                 {
@@ -395,12 +427,10 @@
                     roles: ['Administrator', 'User']
                 }
             ];
-
             const allowedItems = allMenuItems.filter(item => {
                 if (userRole === 'Administrator') return true;
                 return item.roles.includes(userRole);
             });
-
             const cardsHtml = allowedItems.map(item => `
                 <div onclick="navigate('${item.id}')" class="menu-card border-${item.color}-500 group">
                     <div class="icon-wrapper text-${item.color}-500 group-hover:text-white transition-colors">
@@ -412,7 +442,6 @@
                     <p class="text-sm text-gray-400">${item.desc}</p>
                 </div>
             `).join('');
-
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
                     ${createHeader('MENU UTAMA', 'Pilih menu untuk melanjutkan', false)}
@@ -426,37 +455,27 @@
             `;
         }
 
-
         // --- HALAMAN MONITOR DASHBOARD (GAUGE/DONUT) ---
         async function renderMonitorDashboard() {
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
-                    ${createHeader('Dashboard Monitor', 'Klik kartu untuk melihat detail plan')}
-                    
+                    ${createHeader('Dashboard Monitor', 'Klik kartu untuk melihat timeline detail')}
                     <div id="loading-indicator" class="text-center py-10 text-gray-400 animate-pulse">
                         Mengambil data Live dari Line Produksi...
                     </div>
-
-                    <!-- Area Summary Card -->
                     <div id="summary-section" class="hidden grid grid-cols-1 md:grid-cols-3 gap-6 mb-8"></div>
-
-                    <!-- Grid Kartu Mesin -->
                     <div id="machine-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
-                    
                     <div class="mt-8 text-center">
                         <button onclick="renderMonitorDashboard()" class="text-sm text-green-400 hover:text-green-300 underline">Refresh Data</button>
                     </div>
                 </div>
             `;
-
             try {
                 const result = await fetchSheetData(SHEETS.DASHBOARD);
                 dashboardData = result.data;
                 dashboardHeaders = result.headers;
-                
                 document.getElementById('loading-indicator').classList.add('hidden');
-                
                 renderMachineCards(dashboardData);
             } catch (err) {
                 const errorContainer = document.getElementById('loading-indicator');
@@ -475,31 +494,23 @@
             const summarySection = document.getElementById('summary-section');
             grid.innerHTML = '';
             summarySection.innerHTML = '';
-
             if (data.length === 0) {
                 grid.innerHTML = '<div class="col-span-full text-center text-gray-500">Tidak ada data mesin ditemukan. Cek nama sheet "dashboardproses".</div>';
                 return;
             }
-
-            // --- HITUNG SUMMARY DATA ---
             let totalQtySelesai = 0;
             let totalTarget = 0;
-            
             data.forEach(row => {
                 const qty = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
                 const wait = parseFloat(row['WAIT PROSES'] || row['WAIT_PROSES'] || 0);
                 const trg = parseFloat(row['TARGET'] || (qty + wait));
-                
                 totalQtySelesai += qty;
                 totalTarget += trg;
             });
-
             let totalPercentage = 0;
             if (totalTarget > 0) {
                 totalPercentage = Math.round((totalQtySelesai / totalTarget) * 100);
             }
-
-            // --- RENDER SUMMARY CARDS ---
             summarySection.classList.remove('hidden');
             summarySection.innerHTML = `
                 <div class="summary-card border-emerald-500">
@@ -514,7 +525,6 @@
                     </div>
                     <p class="text-xs text-emerald-400 mt-4">Actual Output</p>
                 </div>
-
                 <div class="summary-card border-blue-500">
                     <div class="flex justify-between items-start">
                         <div>
@@ -527,7 +537,6 @@
                     </div>
                     <p class="text-xs text-blue-400 mt-4">Target Production</p>
                 </div>
-
                 <div class="summary-card border-purple-500">
                     <div class="flex justify-between items-start">
                         <div>
@@ -543,37 +552,29 @@
                     </div>
                 </div>
             `;
-
-            // --- RENDER MACHINE CARDS (CLICKABLE) ---
             data.forEach((row, index) => {
                 const namaMesin = row['MESIN'] || row['NAME'] || `Mesin ${index+1}`;
                 const qtySelesai = parseFloat(row['QTY SELESAI'] || row['QTY_SELESAI'] || 0);
                 const waitProses = parseFloat(row['WAIT PROSES'] || row['WAIT_PROSES'] || 0);
                 const target = parseFloat(row['TARGET'] || (qtySelesai + waitProses)); 
-                
                 let percentage = 0;
                 if (target > 0) {
                     percentage = Math.round((qtySelesai / target) * 100);
                 }
-
                 const canvasId = `chart-${index}`;
                 let progressColor = '#eab308'; 
                 if (percentage >= 90) progressColor = '#22c55e';
                 if (percentage < 30) progressColor = '#ef4444';
-
-                // Tambahkan event onclick openMachineDetail
                 const cardHtml = `
                     <div onclick="openMachineDetail('${namaMesin}')" class="process-card cursor-pointer hover:bg-zinc-750 transition transform hover:-translate-y-1 hover:ring-2 hover:ring-green-500/50">
                         <div class="flex justify-between items-center mb-2">
                             <h3 class="text-xl font-bold text-white truncate" title="${namaMesin}">${namaMesin}</h3>
                             <span class="text-sm font-mono text-gray-400 whitespace-nowrap">${formatNumber(qtySelesai)} / ${formatNumber(target)}</span>
                         </div>
-                        
                         <div class="chart-wrapper">
                             <canvas id="${canvasId}"></canvas>
                             <div class="chart-center-text">${percentage}%</div>
                         </div>
-
                         <div class="flex justify-between items-end mt-2 text-xs text-gray-400 border-t border-gray-700 pt-2">
                             <div>
                                 <p>Qty Selesai</p>
@@ -617,80 +618,232 @@
             });
         }
 
-        // --- HALAMAN DETAIL MESIN (BARU) ---
+        // --- HALAMAN DETAIL MESIN (MODIFIKASI TIMELINE GRAFIK & TABEL) ---
         async function renderDetailMesin() {
             const container = document.getElementById('app-container');
             if (!selectedMachine) {
                 navigate('monitorDashboard');
                 return;
             }
-
             container.innerHTML = `
                 <div class="app-view p-6 max-w-7xl mx-auto">
-                    ${createHeader(`Detail Plan: ${selectedMachine}`, 'Monitoring Parameter Plan Proses', true, 'monitorDashboard')}
+                    ${createHeader(`Timeline: ${selectedMachine}`, 'Visualisasi Jalannya Proses Produksi', true, 'monitorDashboard')}
                     
+                    <!-- CONTAINER CHART TIMELINE (BARU - MODIFIKASI GAYA) -->
+                    <div class="mb-8 bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-lg">
+                        <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
+                            <h3 class="text-white font-bold text-lg">Timeline Produksi Hari Ini</h3>
+                            <div class="flex gap-4 text-xs text-gray-400">
+                                <div class="timeline-legend-item"><span class="timeline-legend-color bg-green-500"></span>Proses Berjalan</div>
+                                <div class="timeline-legend-item"><span class="timeline-legend-color bg-red-500"></span>Waktu Idle / Tunggu</div>
+                            </div>
+                        </div>
+                        <div class="relative h-40 w-full">
+                            <canvas id="timelineChart"></canvas>
+                        </div>
+                        <div id="timeline-loading" class="text-center text-sm text-gray-500 mt-2">Memproses data grafik...</div>
+                    </div>
+
                     <div class="overflow-x-auto shadow-lg rounded-xl border-l-4 border-yellow-500 bg-zinc-800">
                          <div class="p-4 border-b border-zinc-700 flex justify-between items-center bg-zinc-900">
                              <h3 class="text-lg font-bold text-yellow-500">Log Plan Proses</h3>
-                             <span class="text-xs text-gray-500">Sheet: planproses</span>
                          </div>
                         <table class="monitor-table w-full text-left text-sm text-gray-300">
-                            <thead class="bg-zinc-900 uppercase text-xs font-bold text-gray-400 border-b border-zinc-700">
-                                <tr>
-                                    <th class="px-6 py-4">Start</th>
-                                    <th class="px-6 py-4">Finish</th>
-                                    <th class="px-6 py-4">Time Proses</th>
-                                    <th class="px-6 py-4">Ton/Hour</th>
-                                </tr>
-                            </thead>
+                            <thead id="detail-head" class="bg-zinc-900 uppercase text-xs font-bold text-gray-400 border-b border-zinc-700"></thead>
                             <tbody id="detail-body" class="divide-y divide-zinc-700">
-                                <tr><td colspan="4" class="p-6 text-center animate-pulse">Memuat data plan...</td></tr>
+                                <tr><td class="p-6 text-center animate-pulse">Memuat data plan...</td></tr>
                             </tbody>
                         </table>
                     </div>
                 </div>
             `;
-
             try {
+                // Ambil data Plan Proses
                 const result = await fetchSheetData(SHEETS.PLAN);
                 const data = result.data;
+                const headers = result.headers;
                 const tbody = document.getElementById('detail-body');
+                const thead = document.getElementById('detail-head');
+                const loadingText = document.getElementById('timeline-loading');
                 
+                // Batasi header hanya sampai kolom O (15 kolom)
+                const displayHeaders = headers.slice(0, 15);
+                thead.innerHTML = '<tr>' + displayHeaders.map(h => `<th class="px-4 py-3 whitespace-nowrap">${h}</th>`).join('') + '</tr>';
+
                 // Filter data berdasarkan Mesin yang dipilih
-                // Kita normalisasi pencarian kolom untuk menghindari case sensitivity
                 const filteredData = data.filter(row => {
                     const mesinVal = row['MESIN'] || row['NAME'] || '';
-                    return mesinVal === selectedMachine;
+                    return String(mesinVal).trim() === selectedMachine;
                 });
 
                 if (filteredData.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="4" class="p-6 text-center text-gray-500">Tidak ada data plan untuk mesin ${selectedMachine}.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="${displayHeaders.length}" class="p-6 text-center text-gray-500">Tidak ada data plan untuk mesin ${selectedMachine}.</td></tr>`;
+                    loadingText.textContent = "Tidak ada data untuk ditampilkan di grafik.";
                     return;
                 }
 
-                tbody.innerHTML = filteredData.map(row => {
-                    // Mapping kolom secara manual berdasarkan request user
-                    // Menggunakan fallback jika nama kolom di sheet sedikit berbeda (misal underscore vs spasi)
-                    const start = row['START'] || row['MULAI'] || '-';
-                    const finish = row['FINISH'] || row['SELESAI'] || '-';
-                    const timeProses = row['TIME PROSES'] || row['TIME_PROSES'] || row['DURASI'] || '-';
-                    const tonHour = row['TON/HOUR'] || row['TON_HOUR'] || row['OUTPUT'] || '-';
+                // Urutkan data berdasarkan waktu START
+                filteredData.sort((a, b) => {
+                    const tA = timeToMinutes(a['START'] || a['MULAI']);
+                    const tB = timeToMinutes(b['START'] || b['MULAI']);
+                    return tA - tB;
+                });
 
-                    return `
-                        <tr class="hover:bg-zinc-700 transition">
-                            <td class="px-6 py-4 whitespace-nowrap font-mono text-white">${start}</td>
-                            <td class="px-6 py-4 whitespace-nowrap font-mono text-white">${finish}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-yellow-400 font-bold">${timeProses}</td>
-                            <td class="px-6 py-4 whitespace-nowrap text-green-400 font-bold">${tonHour}</td>
-                        </tr>
-                    `;
+                // --- LOGIKA CHART TIMELINE (PROSES BERJALAN & IDLE) ---
+                
+                // Min time default 08:00 (480 menit)
+                const defaultStartMin = 8 * 60; 
+                let minTime = defaultStartMin; 
+                let maxTime = defaultStartMin;
+                let lastFinishMin = defaultStartMin;
+
+                const datasets = [];
+                const processSegments = []; // Untuk segmen Hijau
+                const idleSegments = [];    // Untuk segmen Merah
+                const labels = ['']; // Tetap satu label Y
+
+                filteredData.forEach((row, index) => {
+                    const startRaw = row['START'] || row['MULAI'];
+                    const finishRaw = row['FINISH'] || row['SELESAI'];
+                    
+                    if(startRaw && finishRaw) {
+                        const startMin = timeToMinutes(startRaw);
+                        const finishMin = timeToMinutes(finishRaw);
+
+                        // 1. Tentukan batas waktu minimum/maksimum
+                        if (startMin < minTime) minTime = startMin;
+                        if (finishMin > maxTime) maxTime = finishMin;
+
+                        // 2. Tambahkan Segmen IDLE (Merah) dari finish sebelumnya ke start saat ini
+                        if (startMin > lastFinishMin) {
+                            idleSegments.push({x: [lastFinishMin, startMin], y: 0, label: `Idle: ${minutesToTime(lastFinishMin)} - ${minutesToTime(startMin)}`});
+                        }
+                        
+                        // 3. Tambahkan Segmen PROSES (Hijau)
+                        if (finishMin > startMin) {
+                            processSegments.push({x: [startMin, finishMin], y: 0, label: `Proses: ${minutesToTime(startMin)} - ${minutesToTime(finishMin)}`});
+                        }
+
+                        // Update finish terakhir
+                        lastFinishMin = finishMin;
+                    }
+                });
+
+                // Tambahkan Dataset untuk Segmen Idle (Merah)
+                datasets.push({
+                    label: 'Waktu Idle / Tunggu',
+                    data: idleSegments.map(s => s.x),
+                    backgroundColor: '#f87171', // Red 400
+                    borderSkipped: false,
+                    barPercentage: 0.5,
+                    categoryPercentage: 0.8
+                });
+
+                // Tambahkan Dataset untuk Segmen Proses (Hijau)
+                datasets.push({
+                    label: 'Proses Berjalan',
+                    data: processSegments.map(s => s.x),
+                    backgroundColor: '#4ade80', // Green 400
+                    borderSkipped: false,
+                    barPercentage: 0.5,
+                    categoryPercentage: 0.8
+                });
+                
+                // Pastikan maxTime minimal 1 jam setelah proses terakhir, atau 24:00
+                const nextHourAfterMax = (Math.ceil(maxTime / 60) * 60) + 60; // Dibulatkan ke jam berikutnya + 1 jam padding
+                maxTime = Math.max(nextHourAfterMax, 24 * 60); 
+
+                // Pastikan minTime adalah 08:00 atau lebih awal
+                minTime = Math.min(minTime, defaultStartMin);
+                
+
+                const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
+                new Chart(ctxTimeline, {
+                    type: 'bar',
+                    data: {
+                        labels: labels, 
+                        datasets: datasets
+                    },
+                    options: {
+                        indexAxis: 'y',
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        // Stacked diperlukan agar segmen merah dan hijau muncul di bar yang sama
+                        scales: {
+                            x: {
+                                stacked: true, 
+                                min: minTime,
+                                max: maxTime,
+                                grid: { color: '#3f3f46' },
+                                ticks: {
+                                    color: '#9ca3af',
+                                    // Callback untuk menampilkan waktu (HH:mm)
+                                    callback: function(value) { return minutesToTime(value); }
+                                }
+                            },
+                            y: {
+                                stacked: true,
+                                grid: { display: false },
+                                ticks: { display: false } // Sembunyikan label Y
+                            }
+                        },
+                        plugins: {
+                            tooltip: {
+                                callbacks: {
+                                    title: (tooltipItems) => {
+                                        return tooltipItems[0].dataset.label;
+                                    },
+                                    label: function(context) {
+                                        const start = minutesToTime(context.raw.x[0]);
+                                        const end = minutesToTime(context.raw.x[1]);
+                                        const dur = Math.round(context.raw.x[1] - context.raw.x[0]);
+                                        return `Waktu: ${start} - ${end} (${dur} Menit)`;
+                                    }
+                                }
+                            },
+                            legend: { display: false } // Legend ditampilkan manual di HTML
+                        }
+                    }
+                });
+                loadingText.classList.add('hidden');
+
+                // --- RENDER TABEL LOG PLAN PROSES (MODIFIKASI WARNA) ---
+                tbody.innerHTML = filteredData.map(row => {
+                    // Cek header untuk kolom L (Index 11) dan M (Index 12)
+                    const colL_Key = displayHeaders[11]; 
+                    const colM_Key = displayHeaders[12]; 
+                    
+                    // Ambil nilai dan pastikan diubah ke string upper case untuk perbandingan
+                    const valL = colL_Key && row[colL_Key] !== undefined ? String(row[colL_Key]).trim().toUpperCase() : '';
+                    const valM = colM_Key && row[colM_Key] !== undefined ? String(row[colM_Key]).trim().toUpperCase() : '';
+
+                    let rowClass = 'bg-white text-black text-xs border-b border-gray-300'; 
+                    
+                    // Logika Warna berdasarkan permintaan
+                    
+                    // Kondisi 1: Kolom L ADA data DAN Kolom M ADA data -> Abu-abu Gelap
+                    if (valL !== '' && valM !== '') {
+                        rowClass = 'bg-gray-600 text-white text-xs border-b border-gray-700 font-medium';
+                    } 
+                    // Kondisi 2: Kolom L ADA data TETAPI Kolom M KOSONG -> Hijau Cerah
+                    else if (valL !== '' && valM === '') {
+                        rowClass = 'bg-green-600 text-white text-xs border-b border-green-700 font-medium';
+                    }
+
+                    const cellsHtml = displayHeaders.map(h => {
+                        let cellVal = row[h] !== undefined ? row[h] : '';
+                        return `<td class="px-2 py-2 whitespace-nowrap">${cellVal}</td>`;
+                    }).join('');
+
+                    return `<tr class="${rowClass}">${cellsHtml}</tr>`;
                 }).join('');
 
             } catch (err) {
+                console.error(err);
                 document.getElementById('detail-body').innerHTML = `
-                    <tr><td colspan="4" class="p-6 text-center text-red-500">
+                    <tr><td colspan="15" class="p-6 text-center text-red-500">
                         Gagal memuat data: ${err.message}<br>
-                        <small class="text-gray-500">Pastikan sheet bernama "planproses" ada.</small>
+                        <small class="text-gray-500">Pastikan sheet "planproses" memiliki minimal 15 kolom (A-O).</small>
                     </td></tr>`;
             }
         }
@@ -698,7 +851,6 @@
         // --- HALAMAN KONTROL MESIN ---
         function renderKontrolMesin() {
             const container = document.getElementById('app-container');
-            
             let optionsHtml = '<option value="">-- Pilih Mesin --</option>';
             if (dashboardData.length > 0) {
                 dashboardData.forEach(row => {
@@ -714,11 +866,9 @@
                 });
                 optionsHtml = '<option>Memuat data mesin...</option>';
             }
-
             container.innerHTML = `
                 <div class="app-view p-6 max-w-4xl mx-auto">
                     ${createHeader('Kontrol Mesin', 'Update Status & Output')}
-                    
                     <div class="bg-zinc-800 p-8 rounded-xl shadow-lg border-l-4 border-red-500">
                         <form onsubmit="handleSubmitData(event)">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -760,7 +910,6 @@
             const form = e.target;
             const btn = document.getElementById('btn-submit');
             const feedback = document.getElementById('form-feedback');
-            
             const formData = new FormData(form);
             const payload = {
                 action: 'UPDATE_PRODUKSI', 
@@ -771,11 +920,9 @@
                 user: currentUser.username,
                 timestamp: new Date().toISOString()
             };
-
             btn.disabled = true;
             btn.textContent = 'Mengirim...';
             feedback.classList.add('hidden');
-
             try {
                 await fetch(WEB_APP_URL, {
                     method: 'POST',
@@ -783,7 +930,6 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(payload)
                 });
-
                 feedback.textContent = 'Data Berhasil Dikirim!';
                 feedback.className = 'mb-4 p-3 rounded text-sm text-center font-bold bg-green-900 text-green-200 block';
                 form.reset();
@@ -815,21 +961,17 @@
                     </div>
                 </div>
             `;
-
             try {
                 const result = await fetchSheetData(SHEETS.DETAIL);
                 const headers = result.headers;
                 const data = result.data;
                 const thead = document.getElementById('table-head');
                 const tbody = document.getElementById('table-body');
-                
                 thead.innerHTML = headers.map(h => `<th class="px-6 py-4 whitespace-nowrap">${h}</th>`).join('');
-                
                 if (data.length === 0) {
                     tbody.innerHTML = `<tr><td colspan="${headers.length}" class="p-6 text-center text-gray-500">Data kosong.</td></tr>`;
                     return;
                 }
-                
                 tbody.innerHTML = data.map(row => `
                     <tr class="hover:bg-zinc-700 transition">
                         ${headers.map(h => `<td class="px-6 py-4 whitespace-nowrap">${row[h]}</td>`).join('')}
@@ -879,7 +1021,6 @@
                         </div>
                         <h2 class="text-2xl font-bold text-white mb-2">Monitoring Production System</h2>
                         <p class="text-gray-400 mb-6">Dikembangkan untuk memantau efisiensi (OEE) dan output line produksi secara real-time.</p>
-                        
                         <div class="grid grid-cols-2 gap-4 text-left max-w-md mx-auto text-sm bg-zinc-900 p-4 rounded-lg border border-zinc-700">
                             <div class="text-gray-500">Versi</div><div class="text-white">1.2.0 (RBAC Enabled)</div>
                             <div class="text-gray-500">Database</div><div class="text-white">Google Sheets</div>
