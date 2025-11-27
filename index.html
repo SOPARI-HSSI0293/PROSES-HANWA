@@ -4,9 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Monitoring Proses Produksi</title>
-    <!-- Memuat Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Memuat Chart.js untuk Dashboard Analitik -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         /* Mengatur font default dan dark mode (Tema Zinc/Hitam/Putih) */
@@ -157,7 +155,6 @@
 </head>
 <body>
 
-    <!-- Kontainer Utama Aplikasi -->
     <div id="app-container" class="min-h-screen"></div>
 
     <script type="module">
@@ -197,7 +194,8 @@
             if (parts.length > 2) totalMinutes += parseInt(parts[2]) / 60; 
 
             // Jika waktu sebelum jam 8 pagi, anggap itu hari berikutnya (untuk kasus shift malam)
-            if (parseInt(parts[0]) < 8) { 
+            // Cek jika jam < 8 dan totalMinutes < 480 (8*60)
+            if (parseInt(parts[0]) < 8 && totalMinutes < 480) { 
                 totalMinutes += (24 * 60);
             }
             return totalMinutes;
@@ -210,6 +208,23 @@
             let m = Math.floor(totalMinutes % 60);
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`;
         }
+        
+        // Helper Minutes -> String "HH:mm:ss"
+        function minutesToTimeWithSeconds(minutes) {
+            let totalSeconds = Math.round(minutes * 60);
+            let h = Math.floor(totalSeconds / 3600);
+            let m = Math.floor((totalSeconds % 3600) / 60);
+            let s = totalSeconds % 60;
+            
+            // Logika untuk waktu > 24 jam (misal 25:00:00) 
+            // Untuk representasi HH:mm:ss, kita tidak menggunakan modulo 24 pada jam
+            // Jika Anda ingin menganggap 25:00:00 sebagai 01:00:00 hari berikutnya, gunakan:
+            // let h_display = h % 24; 
+            // Namun, karena ini adalah data START/FINISH, biarkan jam > 24 jika ada.
+            
+            return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+
 
         async function fetchSheetData(sheetName) {
             const url = `https://docs.google.com/spreadsheets/d/${GOOGLE_SHEET_ID}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
@@ -629,7 +644,6 @@
                 <div class="app-view p-6 max-w-7xl mx-auto">
                     ${createHeader(`Timeline: ${selectedMachine}`, 'Visualisasi Jalannya Proses Produksi', true, 'monitorDashboard')}
                     
-                    <!-- CONTAINER CHART TIMELINE (BARU - MODIFIKASI GAYA) -->
                     <div class="mb-8 bg-zinc-900 border border-zinc-700 rounded-xl p-4 shadow-lg">
                         <div class="flex justify-between items-center mb-4 border-b border-zinc-800 pb-2">
                             <h3 class="text-white font-bold text-lg">Timeline Produksi Hari Ini</h3>
@@ -700,7 +714,16 @@
                 const datasets = [];
                 const processSegments = []; // Untuk segmen Hijau
                 const idleSegments = [];    // Untuk segmen Merah
-                const labels = ['']; // Tetap satu label Y
+                const labels = ['SL1']; // Mengubah label menjadi 'SL1' sesuai gambar
+                
+                // 1. Tambahkan segmen idle awal dari 08:00 hingga start pertama, jika start pertama > 08:00
+                const firstStartRaw = filteredData[0]['START'] || filteredData[0]['MULAI'];
+                const firstStartMin = firstStartRaw ? timeToMinutes(firstStartRaw) : defaultStartMin;
+                if (firstStartMin > defaultStartMin) {
+                     idleSegments.push({x: [defaultStartMin, firstStartMin], y: 0, label: `Idle Awal: ${minutesToTime(defaultStartMin)} - ${minutesToTime(firstStartMin)}`});
+                }
+                lastFinishMin = firstStartMin;
+
 
                 filteredData.forEach((row, index) => {
                     const startRaw = row['START'] || row['MULAI'];
@@ -715,17 +738,20 @@
                         if (finishMin > maxTime) maxTime = finishMin;
 
                         // 2. Tambahkan Segmen IDLE (Merah) dari finish sebelumnya ke start saat ini
+                        // Cek hanya jika start saat ini lebih besar dari finish terakhir
                         if (startMin > lastFinishMin) {
                             idleSegments.push({x: [lastFinishMin, startMin], y: 0, label: `Idle: ${minutesToTime(lastFinishMin)} - ${minutesToTime(startMin)}`});
                         }
                         
                         // 3. Tambahkan Segmen PROSES (Hijau)
+                        // Cek jika finish lebih besar dari start (durasi positif)
                         if (finishMin > startMin) {
                             processSegments.push({x: [startMin, finishMin], y: 0, label: `Proses: ${minutesToTime(startMin)} - ${minutesToTime(finishMin)}`});
                         }
 
-                        // Update finish terakhir
-                        lastFinishMin = finishMin;
+                        // Update finish terakhir (ambil nilai terbesar dari start atau finish)
+                        // Ini penting jika data finish tidak berurutan dengan benar, atau ada gap
+                        lastFinishMin = Math.max(lastFinishMin, finishMin);
                     }
                 });
 
@@ -733,32 +759,48 @@
                 datasets.push({
                     label: 'Waktu Idle / Tunggu',
                     data: idleSegments.map(s => s.x),
-                    backgroundColor: '#f87171', // Red 400
+                    backgroundColor: '#ef4444', // Red 500
                     borderSkipped: false,
-                    barPercentage: 0.5,
-                    categoryPercentage: 0.8
+                    barPercentage: 0.8, // Buat bar lebih tebal
+                    categoryPercentage: 1.0 // Mengisi seluruh kategori
                 });
 
                 // Tambahkan Dataset untuk Segmen Proses (Hijau)
                 datasets.push({
                     label: 'Proses Berjalan',
                     data: processSegments.map(s => s.x),
-                    backgroundColor: '#4ade80', // Green 400
+                    backgroundColor: '#22c55e', // Green 500
                     borderSkipped: false,
-                    barPercentage: 0.5,
-                    categoryPercentage: 0.8
+                    barPercentage: 0.8, // Buat bar lebih tebal
+                    categoryPercentage: 1.0 // Mengisi seluruh kategori
                 });
                 
-                // Pastikan maxTime minimal 1 jam setelah proses terakhir, atau 24:00
-                const nextHourAfterMax = (Math.ceil(maxTime / 60) * 60) + 60; // Dibulatkan ke jam berikutnya + 1 jam padding
-                maxTime = Math.max(nextHourAfterMax, 24 * 60); 
-
-                // Pastikan minTime adalah 08:00 atau lebih awal
-                minTime = Math.min(minTime, defaultStartMin);
+                // --- PENENTUAN SKALA WAKTU X ---
                 
+                // Pastikan maxTime minimal 1 jam setelah proses terakhir, atau 17:00 (17*60 = 1020)
+                const defaultEndMin = 17 * 60;
+                // Jika lastFinishMin kurang dari defaultEndMin, kita harus menambahkan segmen idle hingga defaultEndMin
+                if (lastFinishMin < defaultEndMin) {
+                    idleSegments.push({x: [lastFinishMin, defaultEndMin], y: 0, label: `Idle Akhir: ${minutesToTime(lastFinishMin)} - ${minutesToTime(defaultEndMin)}`});
+                    datasets[0].data = idleSegments.map(s => s.x); // Update data Idle
+                    maxTime = defaultEndMin;
+                } else if (lastFinishMin > defaultEndMin) {
+                    // Jika proses melewati 17:00, bulatkan ke jam berikutnya
+                    maxTime = (Math.ceil(lastFinishMin / 60) * 60);
+                } else {
+                    maxTime = defaultEndMin;
+                }
+                
+                // Pastikan minTime adalah 08:00
+                minTime = defaultStartMin;
+                
+                // Buat datasets untuk Chart.js (Chart.js menggabungkan data sets yang berbeda)
+                // Kita perlu menggabungkan semua segmen dan mengurutkannya, tetapi untuk bar horizontal 
+                // dengan array data [[start, end], [start, end]] kita hanya perlu memastikan urutan datasets
+                // dan menggunakan opsi 'stacked'.
 
                 const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
-                new Chart(ctxTimeline, {
+                chartInstances['timelineChart'] = new Chart(ctxTimeline, {
                     type: 'bar',
                     data: {
                         labels: labels, 
@@ -774,21 +816,30 @@
                                 stacked: true, 
                                 min: minTime,
                                 max: maxTime,
-                                grid: { color: '#3f3f46' },
+                                grid: { 
+                                    color: '#3f3f46', 
+                                    drawOnChartArea: true,
+                                    drawTicks: false
+                                },
                                 ticks: {
                                     color: '#9ca3af',
                                     // Callback untuk menampilkan waktu (HH:mm)
-                                    callback: function(value) { return minutesToTime(value); }
+                                    callback: function(value) { return minutesToTime(value); },
+                                    maxRotation: 0,
+                                    minRotation: 0
                                 }
                             },
                             y: {
                                 stacked: true,
                                 grid: { display: false },
-                                ticks: { display: false } // Sembunyikan label Y
+                                ticks: { color: '#9ca3af' } // Tampilkan label Y ('SL1')
                             }
                         },
                         plugins: {
                             tooltip: {
+                                // Mode index agar tooltip menampilkan kedua set data
+                                mode: 'index',
+                                intersect: false,
                                 callbacks: {
                                     title: (tooltipItems) => {
                                         return tooltipItems[0].dataset.label;
@@ -807,31 +858,50 @@
                 });
                 loadingText.classList.add('hidden');
 
-                // --- RENDER TABEL LOG PLAN PROSES (MODIFIKASI WARNA) ---
+                // --- RENDER TABEL LOG PLAN PROSES (MODIFIKASI WARNA & FORMAT WAKTU) ---
                 tbody.innerHTML = filteredData.map(row => {
                     // Cek header untuk kolom L (Index 11) dan M (Index 12)
                     const colL_Key = displayHeaders[11]; 
                     const colM_Key = displayHeaders[12]; 
+                    const startKey = displayHeaders.find(h => h.includes('START') || h.includes('MULAI')) || 'START';
+                    const finishKey = displayHeaders.find(h => h.includes('FINISH') || h.includes('SELESAI')) || 'FINISH';
                     
                     // Ambil nilai dan pastikan diubah ke string upper case untuk perbandingan
                     const valL = colL_Key && row[colL_Key] !== undefined ? String(row[colL_Key]).trim().toUpperCase() : '';
                     const valM = colM_Key && row[colM_Key] !== undefined ? String(row[colM_Key]).trim().toUpperCase() : '';
 
-                    let rowClass = 'bg-white text-black text-xs border-b border-gray-300'; 
+                    let rowClass = 'bg-zinc-800 hover:bg-zinc-700 transition'; 
                     
                     // Logika Warna berdasarkan permintaan
                     
                     // Kondisi 1: Kolom L ADA data DAN Kolom M ADA data -> Abu-abu Gelap
                     if (valL !== '' && valM !== '') {
-                        rowClass = 'bg-gray-600 text-white text-xs border-b border-gray-700 font-medium';
+                        rowClass = 'bg-gray-600 text-white text-xs border-b border-gray-700 font-medium hover:bg-gray-500';
                     } 
                     // Kondisi 2: Kolom L ADA data TETAPI Kolom M KOSONG -> Hijau Cerah
                     else if (valL !== '' && valM === '') {
-                        rowClass = 'bg-green-600 text-white text-xs border-b border-green-700 font-medium';
+                        rowClass = 'bg-green-700 text-white text-xs border-b border-green-800 font-medium hover:bg-green-600';
+                    } else {
+                        rowClass = 'bg-zinc-800 text-gray-300 text-xs border-b border-zinc-700 hover:bg-zinc-700';
                     }
 
                     const cellsHtml = displayHeaders.map(h => {
                         let cellVal = row[h] !== undefined ? row[h] : '';
+                        
+                        // Modifikasi: Format START dan FINISH ke HH:mm:ss
+                        if (h === startKey || h === finishKey) {
+                            // Coba konversi dari menit jika nilai aslinya adalah angka,
+                            // atau biarkan string jika formatnya sudah sesuai
+                            if (typeof cellVal === 'number') {
+                                cellVal = minutesToTimeWithSeconds(cellVal);
+                            } else if (typeof cellVal === 'string' && cellVal.match(/^\d{1,2}:\d{2}(:\d{2})?$/)) {
+                                // Tambahkan :00 jika hanya HH:mm
+                                if (cellVal.split(':').length === 2) {
+                                    cellVal += ':00';
+                                }
+                            }
+                        }
+                        
                         return `<td class="px-2 py-2 whitespace-nowrap">${cellVal}</td>`;
                     }).join('');
 
