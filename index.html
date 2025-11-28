@@ -198,6 +198,7 @@
         let currentUser = null;
         let dashboardData = [];
         let dashboardHeaders = [];
+        let planDataCache = []; // Cache untuk data plan agar tidak fetch berulang kali jika tidak perlu
         let chartInstances = {}; 
         let selectedMachine = null;
         
@@ -205,31 +206,58 @@
         
         function formatNumber(num) {
             if (num === null || num === undefined || isNaN(num)) return '0';
-            return parseFloat(num).toLocaleString('en-US');
+            
+            const parsedNum = parseFloat(num);
+            // Locale 'en-US' untuk pemisah ribuan KOMA (1,690,049)
+            return parsedNum.toLocaleString('en-US', { 
+                minimumFractionDigits: 0, 
+                maximumFractionDigits: 3 
+            });
         }
 
-        // Fungsi konversi waktu yang lebih tangguh
-        // Menerima string "HH:mm" atau angka desimal (0.5 = jam 12 siang)
+        // Fungsi konversi waktu yang LEBIH TANGGUH (Handling Array, Decimal, String)
         function timeToMinutes(input) {
             if (input === null || input === undefined || input === '') return null;
 
-            // Jika input adalah angka (dari Google Sheet seringkali 0.xxxxx)
+            // 1. Handle format Array dari GViz (TimeOfDay): [Jam, Menit, Detik, Ms]
+            if (Array.isArray(input)) {
+                const h = input[0] || 0;
+                const m = input[1] || 0;
+                const s = input[2] || 0;
+                // Hitung menit + detik sebagai desimal
+                return h * 60 + m + (s / 60);
+            }
+
+            // 2. Handle format Angka Desimal (Google Sheet Date Number, 0.5 = 12:00)
             if (typeof input === 'number') {
-                // Konversi hari ke menit (1 hari = 1440 menit)
                 return Math.round(input * 1440);
             }
 
+            // 3. Handle format String
             const str = String(input).trim();
-            // Ganti titik dengan titik dua jika user input manual "08.00"
+            
+            // Cek jika formatnya Date string "Date(year,month,day,h,m,s)"
+            if (str.startsWith('Date')) {
+                const parts = str.match(/\d+/g); // Ambil semua angka
+                if (parts && parts.length >= 5) {
+                    // parts biasanya [y, m, d, h, m, s]
+                    const h = parseInt(parts[3]);
+                    const m = parseInt(parts[4]);
+                    return h * 60 + m;
+                }
+            }
+
+            // Handle manual input "08:00" atau "08.00"
             const normalized = str.replace('.', ':');
             const parts = normalized.split(':');
             
-            if (parts.length < 2) return null;
-            
-            let totalMinutes = parseInt(parts[0]) * 60 + parseInt(parts[1]);
-            if (parts.length > 2) totalMinutes += parseInt(parts[2]) / 60; 
+            if (parts.length >= 2) {
+                let totalMinutes = parseInt(parts[0]) * 60 + parseInt(parts[1]);
+                if (parts.length > 2) totalMinutes += parseInt(parts[2]) / 60; 
+                return totalMinutes;
+            }
 
-            return totalMinutes;
+            return null; // Gagal parse
         }
 
         function minutesToTime(minutes) {
@@ -277,8 +305,8 @@
                 let obj = {};
                 cols.forEach((col, index) => {
                     const cell = row.c[index];
-                    // Ambil nilai terformat (f) jika ada, agar jam terbaca sebagai "08:00" bukan angka
-                    let val = cell ? (cell.f || cell.v) : ''; 
+                    // PERBAIKAN: Prioritaskan nilai mentah (v) dari Google Sheet 
+                    let val = cell ? (cell.v !== null ? cell.v : cell.f) : ''; 
                     if (val === null) val = '';
                     obj[col] = val; 
                 });
@@ -508,11 +536,43 @@
                 </div>
             `;
             try {
-                const result = await fetchSheetData(SHEETS.DASHBOARD);
-                dashboardData = result.data;
-                dashboardHeaders = result.headers;
+                // MODIFIKASI: Fetch kedua sheet (Dashboard & Plan) untuk perhitungan Ton/Hour
+                const [dashboardResult, planResult] = await Promise.all([
+                    fetchSheetData(SHEETS.DASHBOARD),
+                    fetchSheetData(SHEETS.PLAN)
+                ]);
+                
+                dashboardData = dashboardResult.data;
+                dashboardHeaders = dashboardResult.headers;
+                planDataCache = planResult.data; // Simpan untuk dipakai di renderDetailMesin juga
+
+                // Hitung Rata-rata Ton/Hour per Mesin dari Plan Data (Kolom O / Index 14)
+                const machineTonAverages = {};
+                const planHeaders = planResult.headers;
+                const colMachinePlan = planHeaders.find(k => k.includes('MESIN') || k.includes('NAME') || k.includes('LINE')) || 'MESIN';
+                // Asumsi kolom O adalah index 14
+                const colTonHour = planHeaders[14]; 
+
+                if (colTonHour) {
+                    const tempMap = {};
+                    planDataCache.forEach(row => {
+                        const mName = row[colMachinePlan];
+                        const val = parseFloat(row[colTonHour] || 0);
+                        if (mName && val > 0) {
+                            if (!tempMap[mName]) tempMap[mName] = { sum: 0, count: 0 };
+                            tempMap[mName].sum += val;
+                            tempMap[mName].count += 1;
+                        }
+                    });
+                    
+                    Object.keys(tempMap).forEach(key => {
+                        machineTonAverages[key] = (tempMap[key].sum / tempMap[key].count).toFixed(1);
+                    });
+                }
+
                 document.getElementById('loading-indicator').classList.add('hidden');
-                renderMachineCards(dashboardData);
+                renderMachineCards(dashboardData, machineTonAverages);
+
             } catch (err) {
                 const errorContainer = document.getElementById('loading-indicator');
                 errorContainer.classList.remove('animate-pulse');
@@ -525,7 +585,7 @@
             }
         }
 
-        function renderMachineCards(data) {
+        function renderMachineCards(data, machineTonAverages = {}) {
             const grid = document.getElementById('machine-grid');
             const summarySection = document.getElementById('summary-section');
             grid.innerHTML = '';
@@ -553,7 +613,7 @@
                     <div class="flex justify-between items-start">
                         <div>
                             <p class="text-gray-400 text-sm font-medium uppercase tracking-wider">Total Qty Selesai</p>
-                            <h3 class="text-3xl font-bold text-white mt-1">${formatNumber(totalQtySelesai)}</h3>
+                            <h3 class="text-3xl font-bold text-white mt-1">${formatNumber(totalQtySelesai)} <span class="text-sm text-gray-400 font-normal ml-1">Kg</span></h3>
                         </div>
                         <div class="p-2 bg-emerald-500/10 rounded-lg text-emerald-500">
                             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -565,7 +625,7 @@
                     <div class="flex justify-between items-start">
                         <div>
                             <p class="text-gray-400 text-sm font-medium uppercase tracking-wider">Total Plan Qty</p>
-                            <h3 class="text-3xl font-bold text-white mt-1">${formatNumber(totalTarget)}</h3>
+                            <h3 class="text-3xl font-bold text-white mt-1">${formatNumber(totalTarget)} <span class="text-sm text-gray-400 font-normal ml-1">Kg</span></h3>
                         </div>
                         <div class="p-2 bg-blue-500/10 rounded-lg text-blue-500">
                             <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-3 7h3m-3 4h3m-6-4h.01M9 16h.01"></path></svg>
@@ -601,11 +661,15 @@
                 let progressColor = '#eab308'; 
                 if (percentage >= 90) progressColor = '#22c55e';
                 if (percentage < 30) progressColor = '#ef4444';
+
+                // Ambil Rata-rata Ton/Hour jika ada
+                const avgTon = machineTonAverages[namaMesin] || '-';
+
                 const cardHtml = `
                     <div onclick="openMachineDetail('${namaMesin}')" class="process-card cursor-pointer hover:bg-zinc-750 transition transform hover:-translate-y-1 hover:ring-2 hover:ring-green-500/50">
                         <div class="flex justify-between items-center mb-2">
                             <h3 class="text-xl font-bold text-white truncate" title="${namaMesin}">${namaMesin}</h3>
-                            <span class="text-sm font-mono text-gray-400 whitespace-nowrap">${formatNumber(qtySelesai)} / ${formatNumber(target)}</span>
+                            <span class="text-xs bg-zinc-700 px-2 py-1 rounded text-gray-300">Avg: ${avgTon} Ton/h</span>
                         </div>
                         <div class="chart-wrapper">
                             <canvas id="${canvasId}"></canvas>
@@ -695,10 +759,23 @@
                 </div>
             `;
             try {
-                // Ambil data Plan Proses
-                const result = await fetchSheetData(SHEETS.PLAN);
-                const data = result.data;
-                const headers = result.headers;
+                // Ambil data Plan Proses (gunakan cache jika ada dari dashboard)
+                let data, headers;
+                if (planDataCache.length > 0) {
+                    data = planDataCache;
+                    // Headers mungkin belum tersimpan di cache global secara eksplisit, 
+                    // tapi kita bisa ambil dari dashboardHeaders jika struktur fetch sama,
+                    // atau fetch ulang jika ragu. Agar aman fetch ulang header saja atau fetch penuh jika kosong.
+                    // Untuk simplifikasi dan konsistensi, kita fetch ulang jika headers plan belum ada
+                    const result = await fetchSheetData(SHEETS.PLAN);
+                    headers = result.headers;
+                    data = result.data; // Refresh data to be sure
+                } else {
+                    const result = await fetchSheetData(SHEETS.PLAN);
+                    data = result.data;
+                    headers = result.headers;
+                }
+
                 const tbody = document.getElementById('detail-body');
                 const thead = document.getElementById('detail-head');
                 const debugText = document.getElementById('timeline-debug');
@@ -708,6 +785,8 @@
                 const startKey = allKeys.find(k => k.includes('START') || k.includes('MULAI')) || 'START';
                 const finishKey = allKeys.find(k => k.includes('FINISH') || k.includes('SELESAI')) || 'FINISH';
                 const machineKey = allKeys.find(k => k.includes('MESIN') || k.includes('NAME') || k.includes('LINE')) || 'MESIN';
+                // Kolom C adalah index ke-2
+                const colC_Key = headers[2]; 
                 
                 // Tampilkan Header Tabel
                 const displayHeaders = headers.slice(0, 15);
@@ -805,10 +884,15 @@
                     }
                     
                     // Tambahkan segmen Proses (Hijau)
+                    // Ambil info tambahan dari Kolom C
+                    const colC_Val = process.details[colC_Key] || '-';
                     processSegments.push({
                         x: [process.start, process.end],
                         y: selectedMachine,
-                        details: process.details 
+                        details: {
+                            ...process.details,
+                            customInfo: colC_Val
+                        }
                     });
 
                     // Update currentTime ke akhir proses ini
@@ -854,9 +938,8 @@
                         responsive: true,
                         maintainAspectRatio: false,
                         interaction: {
-                            mode: 'nearest',
-                            axis: 'y',
-                            intersect: false
+                            mode: 'point', // Only trigger when hovering exactly over the point/bar
+                            intersect: true // Must intersect the element
                         },
                         scales: {
                             x: {
@@ -886,10 +969,22 @@
                                         const raw = context.raw;
                                         const label = context.dataset.label;
                                         if (raw.x && Array.isArray(raw.x)) {
-                                            const s = minutesToTime(raw.x[0]);
-                                            const e = minutesToTime(raw.x[1]);
                                             const duration = (raw.x[1] - raw.x[0]).toFixed(0);
-                                            return `${label}: ${s} - ${e} (${duration} min)`;
+                                            
+                                            // MODIFIKASI TOOLTIP
+                                            if (label === 'Proses Berjalan') {
+                                                const s = minutesToTime(raw.x[0]);
+                                                const e = minutesToTime(raw.x[1]);
+                                                const info = raw.details && raw.details.customInfo ? raw.details.customInfo : '-';
+                                                return [
+                                                    `Jam: ${s} - ${e}`,
+                                                    `Lama Proses: ${duration} menit`,
+                                                    `Info: ${info}`
+                                                ];
+                                            } else {
+                                                // Downtime
+                                                return `Lama Downtime: ${duration} menit`;
+                                            }
                                         }
                                         return '';
                                     }
@@ -1084,25 +1179,22 @@
             const container = document.getElementById('app-container');
             container.innerHTML = `
                 <div class="app-view p-6 max-w-4xl mx-auto">
-                    ${createHeader('Informasi', 'Panduan Operasional')}
+                    ${createHeader('Informasi', 'Panduan Operator')}
                     <div class="bg-zinc-800 p-8 rounded-xl shadow-lg text-gray-300 space-y-4 border-l-4 border-cyan-500">
-                        <h3 class="text-xl font-bold text-white">Cara Membaca Dashboard Monitor</h3>
+                        <h3 class="text-xl font-bold text-white">Cara Membaca Dashboard</h3>
                         <ul class="list-disc pl-5 space-y-2">
-                            <li><strong>Total Qty Selesai:</strong> Menunjukkan Total Qty Selesai hari ini All Line.</li>
-                            <li><strong>Total Plan Qty:</strong> Menunjukkan Total Plan Qty hari ini All Line.</li>
-                            <li><strong>Pencapaian Total:</strong> Menunjukkan Pencapaian Total hari ini All Line.</li>
-                            <li><strong>Grafik Donut:</strong> Menunjukkan persentase penyelesaian target perLine.</li>
-                            <li><strong>Kartu Line:</strong> kartu Line dapat di klik untuk melihat detail perLine.</li>
-                            <li><strong>Timeline Produksi:</strong> Warna Hijau = waktu mesin Running, Merah = Mesin Berhenti.</li>
-                            <li><strong>Log Plan Proses:</strong> Warna abu-abu = Selesai Proses, Hijau = Sedang Proses, Putih =  Wait Proses.</li>
+                            <li><strong>Grafik Donut:</strong> Menunjukkan persentase penyelesaian target hari ini.</li>
+                            <li><strong>Warna Kuning:</strong> Proses berjalan normal (Standard).</li>
+                            <li><strong>Warna Hijau:</strong> Pencapaian target > 90% (Excellent).</li>
+                            <li><strong>Warna Merah:</strong> Pencapaian < 30% atau ada downtime.</li>
                         </ul>
                         <div class="border-t border-gray-700 my-4"></div>
                         <h3 class="text-xl font-bold text-white">Prosedur Update Data</h3>
-                        <p> Update data di bagi ke dilakukan oleh 2 Section</p>
+                        <p>Operator atau Admin wajib melakukan update data melalui menu "Kontrol Mesin" setiap:</p>
                         <ol class="list-decimal pl-5 space-y-1">
-                            <li>PIC Planing update plan proses.</li>
-                            <li>Member Produksi dengan Scan WOS lewat aplikasi.</li>
-                            <li>Revisi Data jika ada kesalahan hubungi Administrator.</li>
+                            <li>Pergantian Shift.</li>
+                            <li>Mesin Breakdown/Stop lebih dari 15 menit.</li>
+                            <li>Pencapaian output per jam.</li>
                         </ol>
                     </div>
                 </div>
@@ -1119,13 +1211,12 @@
                         <div class="h-20 w-20 bg-green-900 rounded-full mx-auto flex items-center justify-center mb-4">
                              <span class="text-4xl">📊</span>
                         </div>
-                        <h2 class="text-2xl font-bold text-white mb-2">HANWA Monitoring Production System</h2>
-                        <p class="text-gray-400 mb-6">Dikembangkan untuk memantau efisiensi proses dan output line produksi secara real-time.</p>
+                        <h2 class="text-2xl font-bold text-white mb-2">Monitoring Production System</h2>
+                        <p class="text-gray-400 mb-6">Dikembangkan untuk memantau efisiensi (OEE) dan output line produksi secara real-time.</p>
                         <div class="grid grid-cols-2 gap-4 text-left max-w-md mx-auto text-sm bg-zinc-900 p-4 rounded-lg border border-zinc-700">
                             <div class="text-gray-500">Versi</div><div class="text-white">1.2.0 (RBAC Enabled)</div>
                             <div class="text-gray-500">Database</div><div class="text-white">Google Sheets</div>
                             <div class="text-gray-500">Status</div><div class="text-green-400">Online</div>
-                            <div class="text-gray-500">Elaborated</div><div class="text-white">Sopari-HSSI0293</div>
                         </div>
                     </div>
                 </div>
